@@ -1,8 +1,7 @@
-# 易笺自托管：第 2 期
+# 易笺自托管：第 3 期
 
-已实现服务端原文书库、SQLite 阅读进度、浏览器缓存迁移、陪读鉴权和子路径运行；本期增加划线、页边批注串和 handoff。阅读排版、字体、目录、分页、无限滚动和设置继续使用上游实现；首次使用默认深色，仍可切换浅色。
+已实现服务端原文书库、SQLite 阅读进度、浏览器缓存迁移、陪读鉴权、子路径运行、划线、页边批注串和 handoff；本期增加读完卡片、档案、xlsx 导入及陪读起草。阅读排版、字体、目录、分页、无限滚动和设置继续使用上游实现；首次使用默认深色，仍可切换浅色。
 
-读完卡片、档案、xlsx 导入和起草属于第 3 期，本期没有这些接口。
 
 ## 启动
 
@@ -64,7 +63,7 @@ location /reader/ {
 ```text
 DATA_DIR/
   books/<sha256>.txt     # 解码为 UTF-8 的原文，含空行
-  reader.db             # SQLite：书籍、进度、划线、批注与 handoff
+  reader.db             # SQLite：书籍、进度、批注、handoff、阅读统计、档案、草稿
   cache/                # 预留的可重建加工缓存
 ```
 
@@ -97,7 +96,7 @@ DATA_DIR/
 | POST | `/api/books?filename=...&encoding=...` | 原始 txt 请求体上传；编码参数可省略，最大 50 MiB |
 | GET | `/api/books/:id` | 元数据和当前进度 |
 | PATCH | `/api/books/:id` | JSON `{filename?, title?, author?}` |
-| DELETE | `/api/books/:id` | 删除书籍、进度、划线、批注及该书 handoff |
+| DELETE | `/api/books/:id` | 删除书籍、进度、划线、批注、统计、草稿及该书 handoff；档案保留为无原文记录 |
 | GET | `/api/books/:id/download` | 下载 UTF-8 原文 |
 | GET | `/api/books/:id/text?from=1&to=20` | 原文片段，范围包含两端，保留空行 |
 | GET | `/api/books/:id/progress` | 当前进度 |
@@ -163,16 +162,81 @@ curl -X POST -H "Authorization: Bearer $HALS_TOKEN" "$READER_URL/api/handoff/$HA
 
 服务首次启动会为一期 SQLite 数据库自动增加 `notes`、`handoff` 表及索引，不改书籍和进度。备份范围仍为 `books/` 和 `reader.db`。
 
+## 读完卡片与档案
+
+读到末页末段后出现建议，可点击“继续阅读”关闭；工具栏也有“读完了”。打开卡片或到达末尾不写档案，只有点击“保存记录”才保存“已看完”及其他填写内容。书名、作者、开始/读完日期、阅读时长和字数自动填入，作者未识别时须手填。切换“未看完”会清空读完日期，日期仍可手动修改。
+
+开始日期取首次真实阅读交互；打开、自动恢复进度及填写档案不计阅读。时长只累计页面可见且最近两分钟内有正文、目录或翻页交互的时间，卡片/档案打开期间暂停。每个阅读会话使用固定 `sessionId` 和累计 `elapsedMs`，重复或晚到的较小累计值不重复计时；离线数据存在浏览器，联网后重试。多设备同时阅读的会话分别累计，无法排除并行阅读的重叠时间。字数按非空白 Unicode 字符计数，包含标点，emoji 按一个字符计数；旧数据在首次查询时补算，开始日期不伪造。历史导入没有时长或字数时显示“未知”。
+
+问卷选项与任务单第二版一致，统一定义在 [review-fields.js](shared/core/reader/review-fields.js)，由卡片、导入、标签和服务端校验共用。时代背景只显示对应子题，切换背景清除不再适用的选择。每个枚举选项完整作为标签（如“踩我雷点 滚”保留其中空格），补充标签按空格、英文/中文逗号拆分。
+
+“档案”可按书或按标签查看，搜索书名/作者，并按评价、平台、背景筛选。支持新建、编辑、删除；关联原文的记录提供“去阅读”，没有 txt 的记录仍可查看/编辑。删除原文保留档案。上传同名同作者的 txt 时提示“关联原文”，只有明确点击才关联；多份同名同作者的原文在导入预览中由读者选择。手动编辑档案带 `updatedAt`，旧版本保存返回 409，保留输入供读者处理冲突。
+
+## xlsx 导入
+
+在档案页点击“导入 xlsx”。只读第一张工作表，首行为表头：`书名（必填）`、`作者（必填）`、问卷题目、`提交时间（自动）`、`提交者（自动）`，可额外包含 `感想`/`读后感`、`开始阅读日期`、`读完日期` 和其他原始列。联动列接受任务单的完整标题，例如 `└ 古代（选古代才出）`。多选单元格使用 `, ` 分隔，未出现的联动子题为空。
+
+先展示行号、错误、未知选项、重复状态和原文关联选择；确认已选行后才写档案，错误行和重复行默认不可选择。表外选项或不适用的联动值保留到补充标签，并以黄色提示；所有原始列和值保存于记录的 `original`，可在编辑卡片中展开查看，未知列和原始字符串空白不丢失。
+
+以裁剪首尾空白后的（书名、作者、提交时间）去重；同文件重复行与已入库记录都跳过，重导不覆盖已有修改。提交时间统一为 UTC、按秒四舍五入，以兼容 Excel 日期单元格的浮点误差；无时区的文本按 UTC 解释，有时区的文本转换为 UTC，原始值另存。支持 Excel 日期单元格及 `2026-10-01 13:30:00`、ISO 时间文本。
+
+文件最多 8 MiB，解压总量最多 32 MiB、1000 个条目；最多 5000 条记录、50 列、400 万文本字符。预览保存于 SQLite、30 分钟有效，只保留最近三份；过期或书籍信息变化需重新预览。导入不执行公式，只使用导出文件中的缓存值。
+
+## 让小克起草
+
+点击按钮创建带 `requestId` 的 `draft_request` handoff，payload 包含 `{requestId, archiveId, book, notes}`：书籍元数据、统计以及当时全部划线/批注快照。陪读端读取队列、生成草稿，再用正确 Bearer 回填；阅读器本身不调用模型或自动生成感想，陪读需自行消费该接口。
+
+草稿独立存入 `reviewDrafts`，回填不会改变人工感想，也不隐式 ack handoff。卡片每五秒刷新当前请求；同一卡片的新请求优先于晚到旧请求。点击“采用草稿”才复制到感想框，已有文字会确认，可再修改并保存。未保存的新卡片的起草请求会在保存时关联新档案，重新打开该档案仍能看到草稿。同请求同文本回填幂等，不同文本返回 409；要重新起草应创建新请求。
+
+## 第 3 期接口
+
+所有路径前加 `BASE_PATH`。GET 允许读者和陪读；档案修改、导入、计时、关联和起草请求仅允许浏览器读者，草稿回填仅允许陪读。
+
+| 方法 | 路径 | 用途 |
+|---|---|---|
+| GET | `/api/books/:id/stats` | `{bookId, startedAt, readingMs, wordCount}` |
+| POST | `/api/books/:id/reading` | `{sessionId, startedAt, elapsedMs}`；开始时间为 Unix 毫秒，支持 beacon |
+| GET | `/api/archives?q=&rating=&platform=&background=&tag=&bookId=` | 档案数组，包含 fields、tags、warnings、hasBook |
+| POST | `/api/archives` | `{title, author, bookId?, startedAt?, finishedAt?, fields?, reflection?, draftRequestId?}` |
+| GET | `/api/archives/:recordId` | 完整档案，含 original 原始字段 |
+| PATCH | `/api/archives/:recordId` | 同创建字段及必填 `updatedAt`，防旧页面覆盖 |
+| DELETE | `/api/archives/:recordId` | 删除档案 |
+| POST | `/api/archive-import/preview?filename=...xlsx` | 原始 xlsx 请求体，返回 previewId、expiresAt、逐行 errors/warnings/candidates |
+| POST | `/api/archive-import/commit` | `{previewId, rows:[2,3], links?:{"2":"bookId或null"}}`；返回 imported、duplicates、inserted |
+| GET | `/api/books/:id/archive-candidates` | 同名同作者且未关联的档案 |
+| POST | `/api/books/:id/archive-link` | `{recordIds:[1,2]}`，明确关联匹配档案 |
+| POST | `/api/books/:id/draft-request` | `{archiveId?:1}`，返回 requestId、handoffId、pending 草稿 |
+| GET | `/api/books/:id/review-draft?requestId=...` | 指定请求；未知请求返回 404 |
+| GET | `/api/books/:id/review-draft?archiveId=1` | 该档案最新请求；`archiveId=new` 查询未保存卡片的请求，无请求返回 null |
+| POST | `/api/books/:id/review-draft` | 陪读 `{requestId, draft}`，仅回填草稿 |
+
+日期使用 `YYYY-MM-DD` 或 null；标题/作者必填，感想/草稿最多 50000 字符。`fields` 使用共享定义中的键，例如 `{rating:"值得多刷", background:"古代", ancient:["修仙"], completed:"已看完"}`，无选项时用空字符串或空数组。关联书籍的手工档案在保存时从服务器刷新时长和字数。
+
+```bash
+# 浏览器写操作示例：无 Bearer，Origin 与站点同源；生产环境还需已有登录网关会话。
+curl -H 'Origin: http://127.0.0.1:18140' -H 'Content-Type: application/json' \
+  --data '{"archiveId":null}' "$READER_URL/api/books/$BOOK_ID/draft-request"
+# REQUEST_ID 取该响应中的 requestId，或 draft_request handoff 的 payload.requestId。
+curl -H "Authorization: Bearer $HALS_TOKEN" -H 'Content-Type: application/json' \
+  --data "{\"requestId\":\"$REQUEST_ID\",\"draft\":\"虚构的读后感草稿\"}" \
+  "$READER_URL/api/books/$BOOK_ID/review-draft"
+curl -H "Authorization: Bearer $HALS_TOKEN" "$READER_URL/api/archives"
+```
+
+启动自动为前两期数据库增加阅读统计、会话、档案、草稿和导入预览表，已有数据不需重新上传。备份范围仍是 `books/` 和 `reader.db`。
+
 ## 自测
 
 ```bash
 cd server
 npm test
 PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium npm run test:browser
+# 最小三期自测：生成样例 xlsx、预览/导入、上传 txt、写批注、取 handoff、回填草稿。
+node --test test/reviews.mjs
 ```
 
-API 自测会创建临时 SQLite 数据目录和随机测试 token，自行启动/停止服务，不使用部署数据库。覆盖根路径、`/reader/`、去重、同名不同书、原文空行、元数据、进度冲突与回翻、beacon、鉴权、静态隔离、WebSocket；二期增加划线/批注增改删、作者不可伪造、跨书回复拒绝、已读标记、handoff 游标分页与幂等确认，以及重启持久化。
+API 自测会创建临时 SQLite 数据目录和随机测试 token，自行启动/停止服务，不使用部署数据库。覆盖根路径、`/reader/`、去重、同名不同书、原文空行、元数据、进度冲突与回翻、beacon、鉴权、静态隔离、WebSocket；二期增加划线/批注增改删、作者不可伪造、跨书回复拒绝、已读标记、handoff 游标分页与幂等确认，以及重启持久化。三期增加可见/两分钟计时边界、档案增改删与版本冲突、xlsx 逐行预览/去重/原始值、无原文档案及关联、起草快照、请求绑定和晚到草稿不覆盖感想。
 
-浏览器自测使用独立浏览器缓存验证换设备恢复、初始化不覆盖、断网回翻后重试、旧浏览器迁移及上游分页/无限滚动；二期增加拖选、跨段空行/中文/emoji 坐标、划线恢复、页边批注读写、未读提示、安全展示、移动端触摸菜单、高亮兼容渲染和断网输入保留。所有书籍都是脚本生成的测试文本。若本机没有 Chromium，可自行安装后设置路径；阅读服务本身不需要浏览器。xlsx 自测随第三期交付。
+浏览器自测使用独立浏览器缓存验证换设备恢复、初始化不覆盖、断网回翻后重试、旧浏览器迁移及上游分页/无限滚动；二期增加拖选、跨段空行/中文/emoji 坐标、划线恢复、页边批注读写、未读提示、安全展示、移动端触摸菜单、高亮兼容渲染和断网输入保留。三期验证真实交互计时、读完建议可关闭、联动选项、草稿显式采用/修改/保存、按书/标签筛选、导入确认/重导、无原文查看及显式关联、手机卡片和浅色布局。所有书籍与 xlsx 都由 [review-workbook.mjs](server/test/fixtures/review-workbook.mjs) 等脚本生成，不包含真实数据。若本机没有 Chromium，可自行安装后设置路径；阅读服务本身不需要浏览器。
 
 移动端自动检查使用 390px 视口、Selection API 和触摸事件；系统原生长按手柄的交互需在实际手机浏览器验收。

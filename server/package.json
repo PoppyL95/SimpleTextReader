@@ -8,8 +8,8 @@
         "prisma:init": "prisma init",
         "prisma:generate": "prisma generate",
         "prisma:push": "prisma db push",
-        "test": "node --test test/smoke.mjs test/annotations.mjs",
-        "test:browser": "node test/browser.mjs && node test/browser-annotations.mjs"
+        "test": "node --test test/smoke.mjs test/annotations.mjs test/reviews.mjs",
+        "test:browser": "node test/browser.mjs && node test/browser-annotations.mjs && node test/browser-reviews.mjs"
     },
     "keywords": [
         "simpletextreader",
@@ -27,7 +27,9 @@
         "express-session": "^1.18.1",
         "jschardet": "^3.1.4",
         "mime-types": "^2.1.35",
-        "ws": "^8.18.0"
+        "read-excel-file": "^9.3.10",
+        "ws": "^8.18.0",
+        "yauzl": "^3.4.0"
     },
     "devDependencies": {
         "canvas": "^3.1.0",
@@ -35,6 +37,7 @@
         "nodemon": "^3.1.7",
         "prisma": "5.10.2",
         "puppeteer": "^24.10.1",
-        "serve-static": "^2.2.0"
+        "serve-static": "^2.2.0",
+        "write-excel-file": "^4.1.1"
     }
 }

@@ -1,0 +1,144 @@
+/** Phase-three acceptance with invented data, real UI controls and fresh devices. */
+import assert from 'node:assert/strict';
+import puppeteer from 'puppeteer';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import path from 'node:path';
+import { tmpdir } from 'node:os';
+import { startReader } from './smoke.mjs';
+import { sampleWorkbook } from './fixtures/review-workbook.mjs';
+
+const source = '第一章\n\n开篇测试段落。\n\n' + Array.from({ length: 100 }, (_, i) => `第${i}段：这是虚构的阅读验收文本，保留上游排版。`).join('\n') + '\n第二章\n结尾测试段落。';
+const browser = await puppeteer.launch({ executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
+    headless: true, args: ['--no-sandbox'] });
+try {
+    for (const prefix of ['', '/reader']) {
+        const directory = await mkdtemp(path.join(tmpdir(), 'hals-reviews-browser-'));
+        const runtime = await startReader(directory, prefix), contexts = [], errors = [];
+        const workbookPath = path.join(directory, '虚构样例.xlsx'); await writeFile(workbookPath, await sampleWorkbook());
+        const api = async (endpoint, options = {}) => {
+            const response = await fetch(runtime.url + '/api' + endpoint, { ...options,
+                headers: { ...options.headers, Authorization: `Bearer ${runtime.token}` } });
+            assert(response.ok, `${endpoint}: ${response.status}`); return response.json();
+        };
+        const json = value => ({ headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(value) });
+        async function device(mobile = false) {
+            const context = await browser.createBrowserContext(); contexts.push(context);
+            const page = await context.newPage(); page.on('pageerror', error => errors.push(error.message));
+            page.on('dialog', dialog => dialog.accept());
+            if (mobile) await page.setViewport({ width: 390, height: 844, isMobile: true, hasTouch: true, deviceScaleFactor: 2 });
+            await page.goto(runtime.url + '/', { waitUntil: 'networkidle2' });
+            await page.waitForFunction(async () => (await import('./client/app/modules/features/reader-reviews.js')).readerReviews.initialized);
+            await page.evaluate(() => { if (window.Swal?.isVisible()) window.Swal.close(); });
+            return page;
+        }
+        async function upload(page, text, filename) {
+            await page.evaluate(async ({ text, filename }) => {
+                const { FileHandler } = await import('./client/app/modules/file/file-handler.js');
+                await FileHandler.handleSelectedFile([new File([text], filename, { type: 'text/plain' })]);
+            }, { text, filename });
+            await page.waitForSelector('#reader-review-toolbar [data-action="finish"]:not([hidden])');
+            return page.evaluate(async () => (await import('./client/app/modules/api/reader-sync.js')).readerSync.current);
+        }
+        async function archive(page) {
+            await page.click('#reader-review-toolbar [data-action="archive"]');
+            await page.waitForSelector('#reader-archive-list .reader-archive-item');
+        }
+        async function chooseImport(page) {
+            await (await page.$('#reader-archive-import')).uploadFile(workbookPath);
+            await page.waitForSelector('.reader-import-table tr[data-row="3"]');
+        }
+        try {
+            const page = await device();
+            const bookId = await upload(page, source, '测试书.[测试作者].txt');
+            assert.equal((await api(`/books/${bookId}/stats`)).startedAt, null, 'opening alone is not reading');
+            await page.evaluate(async () => (await import('./client/app/modules/features/reader.js')).reader.gotoLine(3, false));
+            await page.click('#line3');
+            await new Promise(resolve => setTimeout(resolve, 1100));
+            await page.click('#reader-review-toolbar [data-action="finish"]');
+            await page.waitForSelector('#review-title');
+            assert.equal(await page.$eval('#review-title', input => input.value), '测试书');
+            assert.equal(await page.$eval('#review-author', input => input.value), '测试作者');
+            const stats = await api(`/books/${bookId}/stats`); assert(stats.readingMs >= 1000); assert(stats.startedAt); assert(stats.wordCount > 0);
+            assert.equal((await api('/archives')).length, 0, 'opening a finish card does not mark complete');
+            await page.select('#review-background', '现代');
+            await page.click('input[name="modern"][value="娱乐圈"]');
+            await page.select('#review-background', '古代');
+            assert.equal(await page.$eval('input[name="modern"][value="娱乐圈"]', input => input.checked), false);
+            await page.click('input[name="ancient"][value="修仙"]');
+            await page.select('#review-rating', '踩我雷点 滚'); await page.select('#review-platform', '长佩');
+            await page.type('#review-extraTags', '手写 标签,第三'); await page.type('#review-reflection', '人类先写的感想');
+            await api(`/books/${bookId}/notes`, { method: 'POST', ...json({ line: 3, text: '给起草的虚构批注' }) });
+            await page.click('[data-action="request-draft"]');
+            await page.waitForFunction(async () => Boolean((await import('./client/app/modules/features/reader-reviews.js')).readerReviews.draftRequest));
+            const requestId = await page.evaluate(async () => (await import('./client/app/modules/features/reader-reviews.js')).readerReviews.draftRequest.requestId);
+            const queue = await api('/handoff?unread=1'); assert.equal(queue.items[0].type, 'draft_request');
+            assert(queue.items[0].payload.notes.some(note => note.text === '给起草的虚构批注'));
+            await page.type('#review-reflection', '，等待时继续修改');
+            await api(`/books/${bookId}/review-draft`, { method: 'POST', ...json({ requestId, draft: '小克返回的独立草稿' }) });
+            await page.evaluate(async () => (await import('./client/app/modules/features/reader-reviews.js')).readerReviews.refreshDraft());
+            await page.waitForSelector('[data-action="adopt-draft"]');
+            assert.equal(await page.$eval('#review-reflection', input => input.value), '人类先写的感想，等待时继续修改');
+            await page.click('[data-action="adopt-draft"]'); await page.type('#review-reflection', '，读者修改后保存');
+            await page.click('[data-action="save-review"]');
+            await page.waitForFunction(() => document.querySelector('.reader-review-status').textContent === '记录已保存');
+            let records = await api('/archives'), manual = records.find(record => record.source === 'manual');
+            assert.equal(manual.reflection, '小克返回的独立草稿，读者修改后保存'); assert(manual.tags.includes('踩我雷点 滚'));
+            assert.equal((await api(`/books/${bookId}/review-draft?archiveId=${manual.id}`)).requestId, requestId, 'saving attaches the new-card draft');
+            await page.screenshot({ path: '/tmp/hals-phase3-card.png' });
+            await page.click('[data-action="close"]');
+            await page.evaluate(async () => {
+                const { reader } = await import('./client/app/modules/features/reader.js');
+                const config = await import('./client/app/config/index.js'); reader.gotoPage(config.VARS.TOTAL_PAGES, 'bottom');
+            });
+            await page.click('#content p:last-of-type');
+            await page.evaluate(async () => { window.scrollTo(0, document.body.scrollHeight); (await import('./client/app/modules/features/reader-reviews.js')).readerReviews.checkEnd(); });
+            await page.waitForSelector('#reader-finish-suggestion:not([hidden])');
+            await page.click('[data-action="dismiss-finish"]'); assert.equal((await api('/archives')).length, 1);
+            await archive(page);
+            await page.select('#archive-platform', '番茄');
+            await page.waitForFunction(() => !document.querySelector('.reader-archive-item'));
+            await page.select('#archive-platform', '长佩');
+            await page.waitForSelector('.reader-archive-item'); await page.select('#archive-mode', 'tag');
+            await page.waitForSelector('[data-tag="踩我雷点 滚"]'); await page.click('[data-tag="踩我雷点 滚"]');
+            assert.equal(await page.$$eval('.reader-archive-item', items => items.length), 1);
+            await page.select('#archive-platform', ''); await page.select('#archive-mode', 'book');
+            await chooseImport(page);
+            assert.equal((await api('/archives')).length, 1, 'preview must not import');
+            assert(await page.$('.reader-import-table tr[data-row="3"].warning'));
+            assert.equal(await page.$eval('.reader-import-table tr[data-row="4"] input', input => input.disabled), true);
+            assert.equal(await page.$eval('.reader-import-table tr[data-row="5"] input', input => input.disabled), true);
+            await page.click('[data-action="confirm-import"]');
+            await page.waitForFunction(() => document.querySelector('.reader-review-status').textContent.includes('已导入 2 条'));
+            records = await api('/archives'); assert.equal(records.length, 3);
+            const orphan = records.find(record => record.title === '未上传书');
+            assert.equal(await page.$(`.reader-archive-item[data-record-id="${orphan.id}"] [data-action="read-book"]`), null);
+            await page.click(`.reader-archive-item[data-record-id="${orphan.id}"] [data-action="edit-record"]`);
+            await page.waitForSelector('#review-title'); assert.equal(await page.$eval('#review-title', input => input.value), '未上传书');
+            assert(await page.$('.reader-review-warning')); assert.equal(await page.$eval('[data-action="request-draft"]', input => input.disabled), true);
+            await page.click('[data-action="back-archive"]'); await page.waitForSelector('#reader-archive-import');
+            await chooseImport(page); assert.equal(await page.$eval('[data-action="confirm-import"]', input => input.disabled), true);
+            await page.click('[data-action="cancel-import"]'); await page.click('[data-action="close"]');
+            const laterId = await upload(page, '第一章\n\n晚到的原文内容。', '未上传书.[原作者].txt');
+            await page.waitForSelector('#reader-archive-links:not([hidden])'); assert.equal((await api(`/archives/${orphan.id}`)).bookId, null);
+            await page.click('[data-action="link-archives"]');
+            await page.waitForFunction(() => document.querySelector('#reader-archive-links').hidden);
+            assert.equal((await api(`/archives/${orphan.id}`)).bookId, laterId);
+            await archive(page); await page.click(`.reader-archive-item[data-record-id="${manual.id}"] [data-action="delete-record"]`);
+            await page.waitForFunction(id => !document.querySelector(`.reader-archive-item[data-record-id="${id}"]`), {}, manual.id);
+            assert.equal((await api('/archives')).length, 2);
+            const mobile = await device(true); await archive(mobile);
+            await mobile.click(`.reader-archive-item[data-record-id="${orphan.id}"] [data-action="edit-record"]`);
+            await mobile.waitForSelector('#review-title');
+            const layout = await mobile.$eval('.reader-review-dialog', element => {
+                const rect = element.getBoundingClientRect(); return { width: rect.width, left: rect.left, right: rect.right, viewport: visualViewport.width };
+            });
+            assert(layout.left >= 0 && layout.right <= layout.viewport + 1, JSON.stringify(layout));
+            await mobile.select('#review-background', '架空(衍生)');
+            await mobile.waitForFunction(() => document.querySelector('input[name="fanfiction"]').getClientRects().length > 0);
+            await mobile.evaluate(() => document.documentElement.setAttribute('data-theme', 'light'));
+            assert.equal(await mobile.$eval('.reader-review-dialog', element => getComputedStyle(element).backgroundColor), 'rgb(255, 255, 255)');
+            await mobile.screenshot({ path: '/tmp/hals-phase3-mobile.png' });
+            assert.deepEqual(errors, []); console.log(`Phase-three browser acceptance passed at ${prefix || '/'}`);
+        } finally { await Promise.all(contexts.map(context => context.close())); await runtime.stop(); await rm(directory, { recursive: true, force: true }); }
+    }
+} finally { await browser.close(); }

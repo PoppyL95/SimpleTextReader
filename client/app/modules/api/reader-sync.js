@@ -96,6 +96,7 @@ class ReaderSync {
             this.online = true;
         } catch { this.online = false; }
         rememberBook(book); this.persist();
+        if (!book.pendingUpload) document.dispatchEvent(new CustomEvent('reader:book-uploaded', { detail: { id: book.id } }));
         const prepared = new File([text], cacheKey(id), { type: 'text/plain' });
         this.prepared.add(prepared);
         return prepared;
@@ -225,6 +226,7 @@ class ReaderSync {
                 const saved = await (await this.request(`/books?filename=${encodeURIComponent(book.filename)}`, {
                     method: 'POST', headers: { 'Content-Type': 'text/plain; charset=utf-8' }, body: cached.data })).json();
                 rememberBook(saved);
+                document.dispatchEvent(new CustomEvent('reader:book-uploaded', { detail: { id: saved.id } }));
             } catch { this.online = false; break; }
         }
         this.persist();

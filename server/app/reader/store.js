@@ -6,7 +6,8 @@ import { pathToFileURL } from 'node:url';
 import jschardet from 'jschardet';
 import { TextProcessorCore } from '../../../shared/core/text/text-processor-core.js';
 import { DATA_DIR } from './settings.js';
-import { AnnotationStore, ANNOTATION_SCHEMA } from './annotations.js';
+import { ANNOTATION_SCHEMA } from './annotations.js';
+import { ReviewStore, REVIEW_SCHEMA } from './reviews.js';
 import { ReaderError } from './errors.js';
 
 export { ReaderError } from './errors.js';
@@ -22,7 +23,7 @@ export function decodeBook(bytes, encoding) {
     catch { throw new ReaderError(400, 'Unsupported encoding; upload UTF-8 or specify encoding'); }
 }
 
-export class ReaderStore extends AnnotationStore {
+export class ReaderStore extends ReviewStore {
     constructor(directory = DATA_DIR) {
         super();
         this.directory = directory;
@@ -30,7 +31,8 @@ export class ReaderStore extends AnnotationStore {
         this.mutations = Promise.resolve();
         // Serialize mutations including original-file changes, not only SQL writes.
         for (const method of ['upload', 'metadata', 'remove', 'saveProgress', 'createNote', 'editNote',
-            'deleteNote', 'markNotes', 'sendSelection', 'ackHandoff']) {
+            'deleteNote', 'markNotes', 'sendSelection', 'ackHandoff', 'saveReading', 'createArchive', 'updateArchive',
+            'deleteArchive', 'linkArchives', 'requestDraft', 'saveDraft', 'previewImport', 'commitImport']) {
             const operation = this[method].bind(this);
             this[method] = (...args) => {
                 const result = this.mutations.then(() => operation(...args));
@@ -60,6 +62,7 @@ export class ReaderStore extends AnnotationStore {
             );
         `);
         await this.db.executeMultiple(ANNOTATION_SCHEMA);
+        await this.db.executeMultiple(REVIEW_SCHEMA);
         return this;
     }
     async list() {
@@ -110,6 +113,7 @@ export class ReaderStore extends AnnotationStore {
         await this.db.execute({ sql: `INSERT INTO books VALUES (?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET
             filename=excluded.filename, title=excluded.title, author=excluded.author, updatedAt=excluded.updatedAt`,
             args: [id, filename, metadata.bookName || filename, metadata.author || '', Buffer.byteLength(text), text.split('\n').length, now, now] });
+        await this.ensureStats(id, text);
         return { ...await this.book(id), progress: await this.progress(id) };
     }
     async metadata(id, changes) {

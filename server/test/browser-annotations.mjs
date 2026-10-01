@@ -97,6 +97,9 @@ try {
             const highlight = notes[0];
             for (const [key, value] of Object.entries(expected)) assert.equal(highlight[key], value, key);
             assert.equal(highlight.author, 'reader');
+            // Persistence can finish before the requestAnimationFrame that paints
+            // the confirmed highlight. Wait for the rendered result as well.
+            await first.waitForFunction(() => CSS.highlights.get('reader-notes')?.size === 2);
             const highlighted = await first.evaluate(() => [...CSS.highlights.get('reader-notes')].map(range => range.toString()).join('|'));
             assert.equal(highlighted, '中文🙂。|乙段中');
             // Selecting again sends the exact same original quote, including CR and blank lines.

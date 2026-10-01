@@ -2,6 +2,7 @@ import express from 'express';
 import { ReaderError } from './store.js';
 import { authenticate } from './auth.js';
 import { MAX_BOOK_BYTES } from './settings.js';
+import { MAX_XLSX_BYTES } from './workbook.js';
 
 export function readerRouter(store) {
     const router = express.Router();
@@ -46,6 +47,21 @@ export function readerRouter(store) {
     router.post('/books/:id/handoff', route(async (req, res) => res.status(201).json(await store.sendSelection(req.params.id, req.body, req.readerIdentity))));
     router.get('/handoff', route(async (req, res) => res.json(await store.handoffs(req.query))));
     router.post('/handoff/:id/ack', route(async (req, res) => res.json(await store.ackHandoff(req.params.id))));
+    router.get('/books/:id/stats', route(async (req, res) => res.json(await store.stats(req.params.id))));
+    router.post('/books/:id/reading', route(async (req, res) => res.json(await store.saveReading(req.params.id, req.body, req.readerIdentity))));
+    router.get('/archives', route(async (req, res) => res.json(await store.archives(req.query))));
+    router.post('/archives', route(async (req, res) => res.status(201).json(await store.createArchive(req.body, req.readerIdentity))));
+    router.get('/archives/:recordId', route(async (req, res) => res.json(await store.archive(req.params.recordId))));
+    router.patch('/archives/:recordId', route(async (req, res) => res.json(await store.updateArchive(req.params.recordId, req.body, req.readerIdentity))));
+    router.delete('/archives/:recordId', route(async (req, res) => { await store.deleteArchive(req.params.recordId, req.readerIdentity); res.sendStatus(204); }));
+    router.post('/archive-import/preview', express.raw({ type: ['application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'application/octet-stream'], limit: MAX_XLSX_BYTES }),
+        route(async (req, res) => res.json(await store.previewImport(req.body, req.query.filename, req.readerIdentity))));
+    router.post('/archive-import/commit', route(async (req, res) => res.json(await store.commitImport(req.body, req.readerIdentity))));
+    router.get('/books/:id/archive-candidates', route(async (req, res) => res.json(await store.archiveCandidates(req.params.id))));
+    router.post('/books/:id/archive-link', route(async (req, res) => res.json(await store.linkArchives(req.params.id, req.body, req.readerIdentity))));
+    router.post('/books/:id/draft-request', route(async (req, res) => res.status(201).json(await store.requestDraft(req.params.id, req.body, req.readerIdentity))));
+    router.get('/books/:id/review-draft', route(async (req, res) => res.json(await store.reviewDraft(req.params.id, req.query.requestId, req.query.archiveId))));
+    router.post('/books/:id/review-draft', route(async (req, res) => res.json(await store.saveDraft(req.params.id, req.body, req.readerIdentity))));
     router.use((_req, res) => res.status(404).json({ error: 'API not found' }));
     router.use((error, _req, res, _next) => {
         const status = error.status || 500;
