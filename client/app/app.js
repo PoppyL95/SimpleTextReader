@@ -63,7 +63,7 @@ import {
 /*
  * Start application initialization
  */
-(async function initializeApp() {
+const appInitialized = (async function initializeApp() {
     if (window.consoleTime) console.time("[time] App Initialization");
 
     /**
@@ -201,7 +201,7 @@ onReady(() => {
      * No need to await
      */
     if (window.consoleTime) console.time("[time][background] Initialize Server Connector");
-    initServerConnector().then(() => {
+    appInitialized.then(() => initServerConnector()).then(() => {
         if (window.consoleTime) console.timeEnd("[time][background] Initialize Server Connector");
     });
 
@@ -461,7 +461,7 @@ function updateMetaTags() {
     updateMetaTag("og-title", CONFIG.RUNTIME_VARS.STYLE.ui_title);
     updateMetaTag("og-description", CONFIG.RUNTIME_VARS.STYLE.ui_description);
     updateMetaTag("og-url", currentUrl);
-    updateMetaTag("og-image", new URL("/client/images/icon.png", currentUrl).href);
+    updateMetaTag("og-image", new URL("client/images/icon.png", currentUrl).href);
 }
 
 /**

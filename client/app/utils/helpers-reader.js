@@ -15,6 +15,7 @@
  * @requires client/app/utils/base
  */
 
+import { readerSync } from "../modules/api/reader-sync.js";
 import * as CONFIG from "../config/index.js";
 import { cbReg } from "../../../shared/core/callback/callback-registry.js";
 import { isInViewport, isInContainerViewport, getScrollY } from "./base.js";
@@ -526,6 +527,7 @@ export function unfreezeContent() {
 export function setHistory(filename, lineNumber) {
     // console.log("History set to line: ", lineNumber);
     localStorage.setItem(filename, lineNumber);
+    readerSync.captureProgress(filename, lineNumber);
     if (lineNumber === 0) {
         // Don't save history if line number is 0
         localStorage.removeItem(filename);

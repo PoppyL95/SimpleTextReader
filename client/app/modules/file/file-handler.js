@@ -23,6 +23,7 @@
  * @requires client/app/utils/helpers-fonts
  */
 
+import { readerSync } from "../api/reader-sync.js";
 import * as CONFIG from "../../config/index.js";
 import { Logger } from "../../../../shared/utils/logger.js";
 import { reader } from "../features/reader.js";
@@ -287,7 +288,7 @@ export class FileHandler {
             resetVars();
             // Trigger different events based on whether files should be loaded
             const eventName = loadFiles ? "handleMultipleBooks" : "handleMultipleBooksWithoutLoading";
-            cbReg.go(eventName, {
+            await cbReg.go(eventName, {
                 files: txtFiles,
                 isFromLocal,
                 isOnServer,
@@ -464,7 +465,9 @@ export class FileHandler {
 
             resetVars();
 
-            const file = await cbReg.go("fileBefore", fileList[0]);
+            const input = await readerSync.prepareFile(fileList[0]);
+            await readerSync.beginOpening(input);
+            const file = await cbReg.go("fileBefore", input);
             metrics.fileSize = file.size;
             metrics.fileName = file.name;
 
@@ -501,7 +504,7 @@ export class FileHandler {
             const metadataStart = performance.now();
             await processor.processBookMetadata();
             CONFIG.VARS.BOOK_AND_AUTHOR = processor.bookMetadata;
-            CONFIG.VARS.FILENAME = file.name && fileList[0].name;
+            CONFIG.VARS.FILENAME = file.name;
             CONFIG.VARS.TITLE_PAGE_LINE_NUMBER_OFFSET = processor.title_page_line_number_offset;
             CONFIG.RUNTIME_VARS.STYLE.seal_rotate_en = processor.seal_rotate_en;
             CONFIG.RUNTIME_VARS.STYLE.seal_left = processor.seal_left;
@@ -656,6 +659,7 @@ export class FileHandler {
 
             // Complete initial processing
             await finalProcessing();
+            await readerSync.finishOpening(reader);
         } catch (error) {
             CONFIG.VARS.IS_BOOK_OPENED = false;
             await resetUI();
@@ -734,6 +738,7 @@ export class FileHandler {
             hideLoadingScreen();
             showContent();
             await cbReg.go("fileAfter");
+            await readerSync.finishOpening(reader);
         } else {
             await FileHandler.handleSelectedFile([book?.data], null, null, true);
         }

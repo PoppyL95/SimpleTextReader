@@ -75,9 +75,9 @@ export function getUIMode(silence = false) {
         return mode;
     }
     if (!silence) {
-        console.log("UI mode is light by default.");
+        console.log("UI mode is dark by default.");
     }
-    return true;
+    return false;
 }
 
 // ===============================

@@ -15,6 +15,8 @@
  * @requires client/app/config/variables-dom
  */
 
+import { catalogBook } from "../api/reader-catalog.js";
+
 import { TextProcessorCore } from "../../../../shared/core/text/text-processor-core.js";
 import { TextProcessorDOM } from "./text-processor-dom.js";
 import * as CONFIG_VAR from "../../config/variables.js";
@@ -65,7 +67,9 @@ export class TextProcessor {
      * @public
      */
     static getBookNameAndAuthor(str) {
-        return TextProcessorCore.getBookNameAndAuthor(str);
+        const book = catalogBook(str);
+        const parsed = TextProcessorCore.getBookNameAndAuthor(book ? book.filename.replace(/\.txt$/i, "") : str);
+        return book ? { ...parsed, bookName: book.title, author: book.author } : parsed;
     }
 
     /**

@@ -98,7 +98,7 @@ function setupLanguageSettings() {
  * Setup UI theme
  */
 function setupUITheme() {
-    const uiMode = toBool(localStorage.getItem("UIMode"), false) ?? true;
+    const uiMode = toBool(localStorage.getItem("UIMode"), false) ?? false;
     const theme = uiMode ? "light" : "dark";
     document.documentElement.setAttribute("data-theme", theme);
 }

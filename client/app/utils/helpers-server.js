@@ -1,3 +1,5 @@
+import { readerSync } from "../modules/api/reader-sync.js";
+import { catalogBook } from "../modules/api/reader-catalog.js";
 /**
  * @fileoverview Utility functions for API communication and file handling
  *
@@ -309,6 +311,7 @@ export const fetchAuthenticatedFile = (() => {
      * @throws {Error} If any error occurs during the process
      */
     return async function (filename, loadContent = true) {
+        if (catalogBook(filename)) return readerSync.fetchFile(filename, loadContent);
         try {
             // console.log("fetchAuthenticatedFile:", { filename, loadContent });
 

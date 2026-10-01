@@ -27,6 +27,8 @@
  * @requires client/app/utils/helpers-worker
  */
 
+import { readerSync } from "../api/reader-sync.js";
+import { catalogBook } from "../api/reader-catalog.js";
 import * as CONFIG from "../../config/index.js";
 import { ICONS } from "../../config/icons.js";
 import { cbReg } from "../../../../shared/core/callback/callback-registry.js";
@@ -599,7 +601,7 @@ class BookshelfDB extends DBManager {
  * @private
  * @namespace
  */
-const bookshelf = {
+export const bookshelf = {
     enabled: false,
     db: null,
     logger: Logger.getLogger("Bookshelf", false),
@@ -755,10 +757,14 @@ const bookshelf = {
                 if (book) {
                     if (book instanceof File) {
                         book[this._CACHE_FLAG_] = true;
+                        await readerSync.beginOpening(book);
                     }
                     resetVars();
                     if (
                         !book_processed ||
+                        (catalogBook(fname) &&
+                            (fetchedBook.bookAndAuthor?.bookName !== catalogBook(fname).title ||
+                             fetchedBook.bookAndAuthor?.author !== catalogBook(fname).author)) ||
                         CONFIG.RUNTIME_CONFIG.ALWAYS_PROCESS ||
                         book_pageBreakOnTitle !== CONFIG.RUNTIME_CONFIG.PAGE_BREAK_ON_TITLE ||
                         forceRefresh
@@ -800,7 +806,7 @@ const bookshelf = {
         } catch (e) {
             console.log(e);
             try {
-                await this.removeBook(book.name); // Remove book from db
+                await this.db.removeBook(book.name); // Discard only the failed local cache
                 await FileHandler.handleSelectedFile([book]); // Retry processing the book
             } catch (retryError) {
                 console.log(retryError);
@@ -845,6 +851,8 @@ const bookshelf = {
         inFileProcessingCallback = false
     ) {
         if (this.enabled) {
+            file = await readerSync.prepareFile(file);
+            isOnServer = !!catalogBook(file.name) && !catalogBook(file.name).pendingUpload;
             // console.log("saveBook: ", file);
             // console.log("file.type: ", file.type);
             // console.log("CONFIG.CONST_FILE.SUPPORTED_FILE_TYPE: ", CONFIG.CONST_FILE.SUPPORTED_FILE_TYPE);
@@ -1015,9 +1023,13 @@ const bookshelf = {
      */
     async removeBook(fname, onSucc = null) {
         if (this.enabled) {
-            this.db.removeBook(fname).then(() => {
+            try {
+                await readerSync.deleteBook(fname);
+                await this.db.removeBook(fname);
                 if (onSucc) onSucc();
-            });
+            } catch {
+                readerSync.status("尚未同步：删除失败，书籍已保留");
+            }
         }
     },
 
@@ -1097,7 +1109,7 @@ const bookshelf = {
             `<div class="book" data-filename="${bookInfo.name}">
                 <div class="cover-container">
                     <div class="cover-hidden-text-container">
-                        <span class="cover-hidden-text">${bookInfo.name}</span>
+                        <span class="cover-hidden-text">${catalogBook(bookInfo.name)?.filename || bookInfo.name}</span>
                         <span class="cover-hidden-text bookName">${currentBookNameAndAuthor.bookName}</span>
                         <span class="cover-hidden-text author">${currentBookNameAndAuthor.author}</span>
                     </div>
@@ -1222,7 +1234,7 @@ const bookshelf = {
                     iconName: "DELETE_BOOK",
                     text: CONFIG.RUNTIME_VARS.STYLE.ui_notification_text_deleteBook.replace(
                         "xxx",
-                        `"${truncateText(bookInfo.name)}"`
+                        `"${truncateText(catalogBook(bookInfo.name)?.filename || bookInfo.name)}"`
                     ),
                 });
             });

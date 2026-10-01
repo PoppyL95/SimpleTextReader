@@ -10,8 +10,8 @@ import { CONST_FONT, CONST_FILE } from "../../client/app/config/constants.js";
 /**
  * Definitions of the backend variables
  */
-const PORT = "8866";
-const BASE_URL = "/api";
+const PORT = "18140";
+const BASE_URL = new URL("../../api", import.meta.url).pathname;
 const CONFIG_TOKEN = "/config";
 const CONFIG_UPDATE_TOKEN = "/update";
 const LIBRARY_TOKEN = "/library";

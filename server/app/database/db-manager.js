@@ -54,7 +54,7 @@ export class DBManager {
      * @returns {Promise<string>} Database version string
      */
     async getDBVersion() {
-        const result = await this.prisma.$queryRaw`SELECT version()`;
+        const result = await this.prisma.$queryRaw`SELECT sqlite_version() AS version`;
         return result[0].version;
     }
 

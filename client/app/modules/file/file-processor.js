@@ -10,6 +10,8 @@
  * @requires client/app/utils/helpers-worker
  */
 
+import { catalogBook } from "../api/reader-catalog.js";
+
 import * as CONFIG from "../../config/index.js";
 import { cbReg } from "../../../../shared/core/callback/callback-registry.js";
 import { FileProcessorCore } from "../../../../shared/core/file/file-processor-core.js";
@@ -70,11 +72,12 @@ export class FileProcessor extends FileProcessorCore {
      */
     async processBookMetadata() {
         const { bookName, author, bookNameRE, authorRE } = await this.#sendWorkerMessage("processMetadata", {
-            fileName: this.file.name,
+            fileName: catalogBook(this.file.name)?.filename || this.file.name,
         });
 
-        this.bookMetadata = { bookName, author, bookNameRE, authorRE };
-        this.title_page_line_number_offset = author !== "" ? 3 : 2;
+        const saved = catalogBook(this.file.name);
+        this.bookMetadata = { bookName: saved?.title ?? bookName, author: saved?.author ?? author, bookNameRE, authorRE };
+        this.title_page_line_number_offset = this.bookMetadata.author !== "" ? 3 : 2;
         this.seal_rotate_en = `${randomFloatFromInterval(-50, 80)}deg`;
         this.seal_left = randomFloatFromInterval(0, 1);
     }

@@ -1,210 +1,66 @@
-/**
- * @fileoverview Express Application Entry Point
- *
- * This module initializes and configures the Express application.
- * It sets up:
- * - Middleware (JSON parsing, session handling)
- * - Static file serving
- * - API routes
- * - Error handling
- * - Server startup
- *
- * The application serves both static files and API endpoints,
- * with a fallback to index.html for client-side routing.
- *
- * @module server/app/app
- * @requires express
- * @requires express-session
- * @requires path
- * @requires fs
- * @requires http
- * @requires server/app/config/config
- * @requires server/app/middleware/error
- * @requires server/app/routes/api
- * @requires server/app/routes/library
- * @requires server/app/websocket/websocket-server
- */
+/** Self-hosted reader: gateway-authenticated browser and companion API. */
+import express from 'express';
+import session from 'express-session';
+import { randomBytes } from 'node:crypto';
+import { createServer } from 'node:http';
+import path from 'node:path';
+import { readFile } from 'node:fs/promises';
+import { ROOT, BASE_PATH, PORT, TRUSTED_PROXY } from './reader/settings.js';
+import { ReaderStore } from './reader/store.js';
+import { readerRouter } from './reader/routes.js';
+import { authenticate } from './reader/auth.js';
+import { WebSocketServer } from 'ws';
 
-import express from "express";
-import session from "express-session";
-import path from "path";
-import { existsSync } from "fs";
-import { createServer } from "http";
-import { config } from "./config/config.js";
-import { security } from "./middleware/security.js";
-import { errorHandler, setupGlobalErrorHandlers } from "./middleware/error.js";
-import { apiRouter } from "./routes/api.js";
-import { libraryRouter } from "./routes/library.js";
-import { WebSocketServer } from "./websocket/websocket-server.js";
-
-/**
- * Express application instance
- * @type {express.Application}
- */
 export const app = express();
-
-/**
- * Apply security middleware
- * @param {express.Request} req - Express request object
- * @param {express.Response} res - Express response object
- * @param {express.NextFunction} next - Express next function
- */
-app.use(security);
-
-/**
- * Configure middleware for parsing request bodies
- * Enables parsing of:
- * - JSON payloads
- * - URL-encoded bodies
- */
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
-
-/**
- * Configure session middleware
- * Sets up session handling with:
- * - Secret key for encryption
- * - Session persistence settings
- * - Cookie configuration
- * @param {Object} config.SESSION - Session configuration
- */
-app.use(session(config.SESSION));
-
-/**
- * Simplified authentication middleware
- * Auto-authenticates all sessions for development
- * @param {express.Request} req - Express request object
- * @param {express.Response} res - Express response object
- * @param {express.NextFunction} next - Express next function
- */
-app.use((req, res, next) => {
-    // If already authenticated, continue
-    if (req.session.authenticated) {
-        return next();
-    }
-
-    // Check if request is from localhost
-    const isLocalRequest = req.ip === "127.0.0.1" || req.ip === "::1" || req.ip === "localhost";
-
-    if (process.env.NODE_ENV === "production") {
-        // Production: only allow local requests to authenticate
-        if (isLocalRequest) {
-            req.session.authenticated = true;
-        }
-    } else {
-        // Development: automatically authenticate all requests
-        req.session.authenticated = true;
-    }
-
+app.disable('x-powered-by');
+app.enable('strict routing');
+app.set('trust proxy', TRUSTED_PROXY.split(',').map(value => value.trim()));
+app.use(session({ secret: process.env.SESSION_SECRET || randomBytes(32).toString('hex'),
+    name: 'readerSession', resave: false, saveUninitialized: false,
+    cookie: { httpOnly: true, sameSite: 'strict', path: `${BASE_PATH}/`, secure: 'auto' } }));
+app.use(express.json({ limit: '64kb' }));
+app.use((_req, res, next) => {
+    res.set('X-Content-Type-Options', 'nosniff');
+    res.set('Referrer-Policy', 'same-origin');
+    res.set('Content-Security-Policy', "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data: blob: https://fontsapi.zeoseven.com; connect-src 'self'; object-src 'none'; frame-ancestors 'none'");
     next();
 });
-
-/**
- * Configure static file serving
- * Serves files from the project root with proper MIME types
- * @param {string} root - Project root
- */
-console.log("Serving files from:", config.PATH.ROOT);
-app.use(
-    express.static(config.PATH.ROOT, {
-        setHeaders: (res, filePath) => {
-            const ext = path.extname(filePath);
-            switch (ext) {
-                case ".js":
-                    res.setHeader("Content-Type", "application/javascript");
-                    break;
-                case ".css":
-                    res.setHeader("Content-Type", "text/css");
-                    break;
-                case ".json":
-                    res.setHeader("Content-Type", "application/json");
-                    break;
-                case ".woff":
-                case ".woff2":
-                    res.setHeader("Content-Type", "application/font-woff");
-                    break;
-                case ".otf":
-                    res.setHeader("Content-Type", "application/font-otf");
-                    break;
-                case ".ttf":
-                    res.setHeader("Content-Type", "application/font-ttf");
-                    break;
-            }
-        },
-    })
-);
-
-/**
- * Mount API router
- * Handles all API endpoints
- * @param {string} base - Base URL for API
- * @param {string} api - API URL
- */
-app.use(config.API.URL.BASE, apiRouter);
-
-/**
- * Mount library API router
- * Handles all library-related API endpoints
- * @param {string} base - Base URL for library API
- * @param {string} library - Library URL
- */
-app.use(config.API.URL.LIBRARY, libraryRouter);
-
-/**
- * Fallback route handler
- * Serves index.html for all unmatched routes to support client-side routing
- * @param {express.Request} req - Express request object
- * @param {express.Response} res - Express response object
- * @param {express.NextFunction} next - Express next function
- */
-app.get("*", (req, res) => {
-    // Use resolve to get the absolute path
-    const rootPath = path.resolve(config.PATH.ROOT);
-    const indexPath = path.resolve(rootPath, "index.html");
-
-    // Validate index.html is indeed in the project root
-    if (!indexPath.startsWith(rootPath)) {
-        console.error("[Security] Invalid index.html path detected");
-        return res.status(400).send("Invalid request");
-    }
-
-    // Validate file exists
-    if (!existsSync(indexPath)) {
-        console.error("[Error] index.html not found at:", indexPath);
-        return res.status(404).send("File not found");
-    }
-
-    res.sendFile(indexPath);
-});
-
-/**
- * Error handling middleware
- * @param {Error} err - Error object
- * @param {express.Request} req - Express request object
- * @param {express.Response} res - Express response object
- * @param {express.NextFunction} next - Express next function
- */
-setupGlobalErrorHandlers();
-app.use(errorHandler);
-
-/**
- * Create HTTP server instance
- * @type {http.Server}
- */
+const store = await new ReaderStore().init();
+app.use(`${BASE_PATH}/api`, (_req, res, next) => { res.set('Cache-Control', 'no-store'); next(); }, readerRouter(store));
+if (BASE_PATH) app.get(BASE_PATH, (_req, res) => res.redirect(301, `${BASE_PATH}/`));
+const manifest = JSON.parse(await readFile(path.join(ROOT, 'client/manifests/PWA/manifest.json'), 'utf8'));
+app.get(`${BASE_PATH}/client/manifests/PWA/manifest.json`, (_req, res) => res.json({ ...manifest,
+    start_url: `${BASE_PATH}/`, scope: `${BASE_PATH}/`, id: `${BASE_PATH}/`,
+    icons: manifest.icons.map(icon => ({ ...icon, src: `${BASE_PATH}/client/images/icon.png` })) }));
+// Explicit frontend trees only. No repository-root, server, DATA_DIR or books static mount.
+for (const folder of ['app', 'css', 'fonts', 'images']) {
+    app.use(`${BASE_PATH}/client/${folder}`, express.static(path.join(ROOT, 'client', folder), { index: false, dotfiles: 'deny' }));
+}
+for (const folder of ['core', 'config', 'utils', 'adapters']) {
+    app.use(`${BASE_PATH}/shared/${folder}`, express.static(path.join(ROOT, 'shared', folder), { index: false, dotfiles: 'deny' }));
+}
+for (const file of ['index.html', 'version.json', 'help.json']) {
+    app.get(`${BASE_PATH}/${file}`, (_req, res) => res.sendFile(path.join(ROOT, file)));
+}
+app.get(`${BASE_PATH}/`, (_req, res) => res.sendFile(path.join(ROOT, 'index.html')));
+app.use((_req, res) => res.status(404).send('Not found'));
+app.use((error, _req, res, _next) => res.status(error.status || 500).json({ error: 'Invalid request' }));
 const server = createServer(app);
-
-/**
- * Initialize WebSocket server
- */
-WebSocketServer.init(server);
-
-/**
- * Start the server
- * Initializes HTTP server on configured port
- * @param {number} port - Server port
- * @param {string} url - Server URL
- */
-server.listen(config.SERVER.PORT, () => {
-    console.log(`Server is running on ${config.SERVER.URL}`);
-    console.log(`WebSocket server is enabled`);
+const websocket = new WebSocketServer({ noServer: true });
+server.on('upgrade', (req, socket, head) => {
+    if (req.url !== `${BASE_PATH}/ws`) { socket.destroy(); return; }
+    const origin = req.headers.origin;
+    const protocol = app.get('trust proxy fn')(req.socket.remoteAddress, 0) && req.headers['x-forwarded-proto'] === 'https' ? 'https' : 'http';
+    if (origin && origin !== `${protocol}://${req.headers.host}`) { socket.destroy(); return; }
+    // Reuse HTTP identity/CSRF middleware; gateway protects the browser route.
+    authenticate(Object.assign(req, { app, session: {}, get: name => req.headers[name.toLowerCase()], protocol }),
+        { status: () => ({ json: () => socket.destroy() }) }, () => {
+            websocket.handleUpgrade(req, socket, head, ws => websocket.emit('connection', ws, req));
+        });
+});
+server.listen(PORT, '127.0.0.1', () => console.log(`Reader listening on 127.0.0.1:${PORT}${BASE_PATH}/`));
+for (const signal of ['SIGINT', 'SIGTERM']) process.on(signal, () => {
+    for (const ws of websocket.clients) ws.terminate();
+    websocket.close();
+    server.close(() => { store.close(); process.exit(0); });
 });

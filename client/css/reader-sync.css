@@ -1,0 +1,9 @@
+#reader-sync-status, #reader-migration {
+    position: fixed; z-index: 9999; bottom: 1rem; right: 1rem;
+    max-width: min(26rem, calc(100vw - 2rem)); padding: .6rem .9rem;
+    color: #eee; background: #252525; border: 1px solid #777; border-radius: .5rem;
+    font: 14px/1.5 sans-serif;
+}
+#reader-sync-status[hidden] { display: none; }
+#reader-migration { bottom: 4rem; }
+#reader-migration button { color: inherit; background: #444; border: 1px solid #777; margin-left: .5rem; cursor: pointer; }

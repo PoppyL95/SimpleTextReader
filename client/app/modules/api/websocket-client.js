@@ -9,6 +9,8 @@
  * @requires shared/utils/logger
  */
 
+import { readerRoot } from "./reader-catalog.js";
+
 import { Logger } from "../../../../shared/utils/logger.js";
 
 /**
@@ -58,7 +60,7 @@ export class WebSocketClient {
      */
     connect() {
         const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-        const wsUrl = `${protocol}//${window.location.host}`;
+        const wsUrl = `${protocol}//${window.location.host}${readerRoot.pathname}ws`;
 
         WebSocketClient.#logger.log("Attempting to connect to WebSocket server:", wsUrl);
 
