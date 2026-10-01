@@ -48,15 +48,21 @@ async function inspectZip(bytes) {
         zip.readEntry();
     }));
 }
-function header(value) { return value.trim().replace(/^└\s*/, '').normalize('NFKC').replace(/\s/g, ''); }
-const headerKeys = new Map();
-for (const field of REVIEW_FIELDS) {
-    const aliases = [field.label];
-    if (field.when) aliases.push(`${field.label}（选${field.when === '架空(衍生)' ? '架空(衍生)' : field.when}才出）`);
-    for (const alias of aliases) headerKeys.set(header(alias), field.key);
+function header(value) {
+    let name = value.trim().replace(/^└\s*/, '').normalize('NFKC').replace(/\s/g, '');
+    // Strip export annotations, including stacked suffixes and conditions with
+    // nested parentheses such as 同人（选架空(衍生)才出）（必填）.
+    let previous;
+    do {
+        previous = name;
+        name = name.replace(/\((?:必填|自动|选.+才出)\)$/u, '');
+    } while (name !== previous);
+    return name;
 }
-for (const [key, aliases] of Object.entries({ title: ['书名（必填）', '书名'], author: ['作者（必填）', '作者'],
-    submittedAt: ['提交时间（自动）', '提交时间'], submitter: ['提交者（自动）', '提交者'],
+const headerKeys = new Map();
+for (const field of REVIEW_FIELDS) headerKeys.set(header(field.label), field.key);
+for (const [key, aliases] of Object.entries({ title: ['书名'], author: ['作者'],
+    submittedAt: ['提交时间'], submitter: ['提交者'],
     startedAt: ['开始阅读日期'], finishedAt: ['读完日期'], reflection: ['感想', '读后感'] })) {
     for (const alias of aliases) headerKeys.set(header(alias), key);
 }
@@ -121,6 +127,8 @@ export async function parseWorkbook(bytes, books, existingKeys) {
         for (const column of columns) {
             const cell = row.getCell(column.column);
             original[column.name] = cell.value ?? '';
+            if (!column.key) warnings.push({ kind: 'unknown_column', field: null, label: column.name, value: '',
+                message: '未识别表头，此列仅保存在原始字段，未填入问卷' });
             try {
                 const value = cellValue(cell);
                 totalCharacters += string(value).length;

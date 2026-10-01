@@ -22,6 +22,7 @@ function select(options, value = '') {
 }
 function calendarDate(date) { return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`; }
 function today() { return calendarDate(new Date()); }
+function warningText(warning) { return `${warning.label}${warning.value ? `：${warning.value}` : ''}（${warning.message}）`; }
 function duration(milliseconds) { return milliseconds == null ? '未知' : `${Math.floor(milliseconds / 3600000)} 小时 ${Math.floor(milliseconds / 60000) % 60} 分钟`; }
 function view() { return window.visualViewport || { width: document.documentElement.clientWidth, height: innerHeight, offsetLeft: 0, offsetTop: 0 }; }
 
@@ -164,7 +165,7 @@ class ReaderReviews {
         form.addEventListener('input', () => { this.dirty = true; }); form.addEventListener('change', () => { this.dirty = true; });
         form.addEventListener('submit', event => { event.preventDefault(); this.saveCard(); });
         this.dialog.append(form); this.updateConditional();
-        if (this.card.warnings?.length) this.dialog.append(node('div', this.card.warnings.map(warning => `${warning.label}：${warning.value}（${warning.message}）`).join('\n'), 'reader-review-warning'));
+        if (this.card.warnings?.length) this.dialog.append(node('div', this.card.warnings.map(warningText).join('\n'), 'reader-review-warning'));
         if (this.card.source === 'import') {
             const details = node('details'); details.append(node('summary', '原始导入字段'), node('pre', JSON.stringify(this.card.original, null, 2), 'reader-review-original')); this.dialog.append(details);
         }
@@ -309,7 +310,7 @@ class ReaderReviews {
             const item = node('article', null, 'reader-archive-item'); item.dataset.recordId = record.id;
             item.append(node('strong', this.filter.mode === 'tag' ? `${record.title} · ${record.author}` : record.finishedAt || record.submittedAt?.slice(0, 10) || record.createdAt.slice(0, 10)),
                 node('div', [record.fields.rating, record.fields.platform, record.fields.background, record.fields.completed].filter(Boolean).join(' · '), 'reader-archive-summary'));
-            if (record.warnings.length) item.append(node('div', '含原始选项，已保留在补充标签', 'reader-review-warning'));
+            if (record.warnings.length) item.append(node('div', '含导入警告，查看记录可见原始字段与提示', 'reader-review-warning'));
             const actions = node('div', null, 'reader-review-actions');
             actions.append(button('查看 / 编辑', () => this.openCard(record.bookId, record.id), 'edit-record'), button('删除', () => this.deleteRecord(record), 'delete-record'));
             if (record.hasBook) actions.append(button('去阅读', () => this.readBook(record.bookId), 'read-book'));
@@ -350,7 +351,7 @@ class ReaderReviews {
         const preview = this.importPreview;
         const errors = preview.rows.filter(row => row.errors.length).length, duplicates = preview.rows.filter(row => row.duplicate).length;
         this.dialog.append(node('p', `${preview.filename} · ${preview.rows.length} 行 · ${errors} 行错误 · ${duplicates} 行重复`),
-            node('p', '黄底为未知选项或联动不一致，值已放入补充标签；错误行不会导入。确认后才写入档案。'));
+            node('p', '黄底含未识别列、未知选项或联动不一致；未识别列保存在原始字段，未知或不适用选项放入补充标签。错误行不会导入，确认后才写入档案。'));
         const actions = node('div', null, 'reader-review-actions');
         actions.append(button('全选可导入行', () => { this.importSelected = new Set(preview.rows.filter(row => !row.errors.length && !row.duplicate).map(row => row.row)); this.paintImport(); }),
             button('清空选择', () => { this.importSelected.clear(); this.paintImport(); })); this.dialog.append(actions);
@@ -362,7 +363,7 @@ class ReaderReviews {
             const chosen = node('input'); chosen.type = 'checkbox'; chosen.checked = this.importSelected.has(row.row); chosen.disabled = Boolean(row.errors.length || row.duplicate);
             chosen.setAttribute('aria-label', `导入第 ${row.row} 行`); chosen.addEventListener('change', () => { if (chosen.checked) this.importSelected.add(row.row); else this.importSelected.delete(row.row); this.updateImportButton(); });
             const choice = node('td'); choice.append(chosen); tr.append(choice, node('td', row.row), node('td', row.record ? `${row.record.title}\n${row.record.author}` : '无效记录'), node('td', row.record?.submittedAt || ''));
-            const messages = [...row.errors, ...row.warnings.map(warning => `${warning.label}：${warning.value}（${warning.message}）`), ...(row.duplicate ? ['重复记录，将跳过'] : [])];
+            const messages = [...row.errors, ...row.warnings.map(warningText), ...(row.duplicate ? ['重复记录，将跳过'] : [])];
             tr.append(node('td', messages.join('\n') || '可导入'));
             const association = node('td');
             if (row.candidates.length) {

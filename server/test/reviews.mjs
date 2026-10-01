@@ -5,7 +5,8 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { startReader } from './smoke.mjs';
-import { sampleWorkbook } from './fixtures/review-workbook.mjs';
+import { sampleWorkbook, TENCENT_HEADERS } from './fixtures/review-workbook.mjs';
+import { parseWorkbook } from '../app/reader/workbook.js';
 import { activeReadingMs, REVIEW_FIELDS } from '../../shared/core/reader/review-fields.js';
 
 for (const prefix of ['', '/reader']) test(`phase 3 API at ${prefix || '/'}`, async t => {
@@ -16,7 +17,7 @@ for (const prefix of ['', '/reader']) test(`phase 3 API at ${prefix || '/'}`, as
     const hals = (endpoint, options = {}) => fetch(runtime.url + '/api' + endpoint, { ...options, headers: { ...options.headers, Authorization: `Bearer ${runtime.token}` } });
     const source = '第一章\n\n甲 段🙂。\n\n第二章\n末段。';
     let book, other, archive, preview, requestA, requestB;
-    const workbook = await sampleWorkbook();
+    const workbook = await sampleWorkbook({ extraColumns: true });
     try {
         book = await (await reader('/books?filename=测试书.[测试作者].txt', { method: 'POST', headers: { 'Content-Type': 'text/plain' }, body: source })).json();
         other = await (await reader('/books?filename=其他书.[测试作者].txt', { method: 'POST', headers: { 'Content-Type': 'text/plain' }, body: source + '\n不同版' })).json();
@@ -56,6 +57,7 @@ for (const prefix of ['', '/reader']) test(`phase 3 API at ${prefix || '/'}`, as
             assert(preview.rows.find(row => row.row === 4).errors.length); assert(preview.rows.find(row => row.row === 5).duplicate);
             const unknown = preview.rows.find(row => row.row === 3); assert.equal(unknown.record.bookId, null); assert(unknown.warnings.length >= 3);
             assert(unknown.record.fields.extraTags.includes('自定义评价')); assert(unknown.record.fields.extraTags.includes('自定义风格'));
+            assert(preview.rows.every(row => row.warnings.some(warning => warning.kind === 'unknown_column' && warning.label === '保留测试列' && warning.message.includes('未识别表头'))));
             assert.equal(preview.rows[0].original['保留测试列'], '  原始空白也要保留  ');
             assert.equal((await reader('/archive-import/commit', { method: 'POST', ...data({ previewId: preview.previewId, rows: [2, 4] }) })).status, 400);
             assert.equal((await (await hals('/archives')).json()).length, 1);
@@ -68,6 +70,7 @@ for (const prefix of ['', '/reader']) test(`phase 3 API at ${prefix || '/'}`, as
             assert.equal(imported.bookId, book.id); assert.equal(imported.reflection, '导入的感想');
             assert.deepEqual(imported.fields.ancient, ['修仙', '武侠江湖']);
             const raw = await (await hals(`/archives/${imported.id}`)).json(); assert.equal(raw.original['保留测试列'], '  原始空白也要保留  ');
+            assert(raw.warnings.some(warning => warning.kind === 'unknown_column' && warning.label === '保留测试列'));
             const freshPreview = await (await reader('/archive-import/preview?filename=样例.xlsx', { method: 'POST', headers: { 'Content-Type': 'application/octet-stream' }, body: workbook })).json();
             assert(freshPreview.rows.filter(row => !row.errors.length).every(row => row.duplicate));
             assert.equal((await reader('/archive-import/preview?filename=bad.xlsx', { method: 'POST', headers: { 'Content-Type': 'application/octet-stream' }, body: 'not an xlsx' })).status, 400);
@@ -113,6 +116,36 @@ for (const prefix of ['', '/reader']) test(`phase 3 API at ${prefix || '/'}`, as
             assert.equal((await fetch(runtime.url + '/reader.db')).status, 404);
         });
     } finally { await runtime.stop(); await rm(directory, { recursive: true, force: true }); }
+});
+
+test('Tencent required headers map every questionnaire field; plain and conditional headers remain compatible', async () => {
+    const conditional = [...TENCENT_HEADERS];
+    conditional[8] = '└ 现代（选现代才出）（必填）';
+    conditional[9] = '└ 古代（选古代才出）';
+    conditional[10] = '└ 未来（选未来才出）';
+    conditional[11] = '└ 同人（选架空(衍生)才出）（必填）';
+    const variants = [TENCENT_HEADERS,
+        TENCENT_HEADERS.map(name => ` ${name.replaceAll('（', ' ( ').replaceAll('）', ' ) ')} `),
+        TENCENT_HEADERS.map(name => name.replace('（必填）', '').replace('（自动）', '')), conditional];
+    for (const headers of variants) {
+        const rows = await parseWorkbook(await sampleWorkbook({ headers }), [], []);
+        assert.deepEqual(rows[0].record.fields, { characters: '虚构主角', rating: '值得多刷', perspective: '女主',
+            relationship: '1v1', background: '古代', modern: [], ancient: ['修仙', '武侠江湖'], future: [], fanfiction: [],
+            style: ['小甜饼', '年龄差（年下/年上）'], extraTags: '测试 标签, 甲', platform: '晋江', completed: '已看完' });
+        assert.deepEqual(rows[0].warnings, []); assert.deepEqual(rows[0].errors, []);
+        assert(rows[3].duplicate); assert.equal(rows[0].record.submittedAt, '2026-09-30T12:30:00.000Z');
+        assert.deepEqual(rows[1].record.fields.future, ['星际']);
+        assert(rows[1].warnings.some(warning => warning.value === '未知未来选项'));
+        assert(rows[1].record.fields.extraTags.includes('自定义评价'));
+    }
+    const rows = await parseWorkbook(await sampleWorkbook(), [], []);
+    assert.deepEqual(Object.keys(rows[0].original), TENCENT_HEADERS);
+    assert.equal(rows[0].original['角色（必填）'], '虚构主角');
+    const unknownHeaders = [...TENCENT_HEADERS]; unknownHeaders[8] = '新版现代题（必填）';
+    const unknownRows = await parseWorkbook(await sampleWorkbook({ headers: unknownHeaders }), [], []);
+    assert.equal(unknownRows[0].original['新版现代题（必填）'], '');
+    assert.deepEqual(unknownRows[0].warnings.map(warning => warning.label), ['新版现代题（必填）']);
+    assert.equal(unknownRows[0].warnings[0].kind, 'unknown_column', 'an empty cell must still warn about its unrecognized header');
 });
 
 test('reading duration respects visible time and the two-minute idle boundary', () => {

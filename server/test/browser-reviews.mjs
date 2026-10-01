@@ -104,6 +104,10 @@ try {
             await page.select('#archive-platform', ''); await page.select('#archive-mode', 'book');
             await chooseImport(page);
             assert.equal((await api('/archives')).length, 1, 'preview must not import');
+            const importedFields = await page.evaluate(async () => (await import('./client/app/modules/features/reader-reviews.js')).readerReviews.importPreview.rows[0].record.fields);
+            assert.equal(importedFields.characters, '虚构主角'); assert.equal(importedFields.rating, '值得多刷');
+            assert.equal(importedFields.platform, '晋江'); assert.equal(importedFields.completed, '已看完');
+            assert.deepEqual(importedFields.ancient, ['修仙', '武侠江湖']);
             assert(await page.$('.reader-import-table tr[data-row="3"].warning'));
             assert.equal(await page.$eval('.reader-import-table tr[data-row="4"] input', input => input.disabled), true);
             assert.equal(await page.$eval('.reader-import-table tr[data-row="5"] input', input => input.disabled), true);
@@ -116,7 +120,10 @@ try {
             await page.waitForSelector('#review-title'); assert.equal(await page.$eval('#review-title', input => input.value), '未上传书');
             assert(await page.$('.reader-review-warning')); assert.equal(await page.$eval('[data-action="request-draft"]', input => input.disabled), true);
             await page.click('[data-action="back-archive"]'); await page.waitForSelector('#reader-archive-import');
+            await writeFile(workbookPath, await sampleWorkbook({ extraColumns: true }));
             await chooseImport(page); assert.equal(await page.$eval('[data-action="confirm-import"]', input => input.disabled), true);
+            const unknownColumn = await page.$eval('.reader-import-table tr[data-row="2"]', row => ({ warning: row.classList.contains('warning'), text: row.textContent }));
+            assert(unknownColumn.warning); assert(unknownColumn.text.includes('保留测试列')); assert(unknownColumn.text.includes('未识别表头'));
             await page.click('[data-action="cancel-import"]'); await page.click('[data-action="close"]');
             const laterId = await upload(page, '第一章\n\n晚到的原文内容。', '未上传书.[原作者].txt');
             await page.waitForSelector('#reader-archive-links:not([hidden])'); assert.equal((await api(`/archives/${orphan.id}`)).bookId, null);
