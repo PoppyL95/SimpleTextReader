@@ -36,6 +36,11 @@ html[data-theme="light"] .reader-review-dialog {
     --review-accent: #85621c; --review-accent-soft: #ae812512;
 }
 .reader-review-dialog > header { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 18px; }
+.reader-review-dialog[data-mode="archive"] > header {
+    position: sticky; top: -24px; z-index: 2;
+    margin: -24px -24px 18px; padding: 18px 24px;
+    background: var(--review-panel); border-bottom: 1px solid var(--review-line);
+}
 .reader-review-dialog h2 { font-family: inherit; font-size: 24px; font-weight: 700; line-height: 1.4; margin: 0; color: inherit; text-align: left; }
 .reader-review-dialog h3 { font-family: inherit; font-size: 16px; font-weight: 650; line-height: 1.5; margin: 0; color: inherit; text-align: left; }
 .reader-review-dialog div { overflow: visible; }
@@ -166,6 +171,7 @@ html[data-theme="light"] .reader-review-dialog .reader-import-table tr.invalid {
 @media (max-width: 760px) { .reader-review-dialog .reader-archive-grid { grid-template-columns: minmax(0, 1fr); } }
 @media (max-width: 560px) {
     .reader-review-dialog { padding: 16px; border-radius: 12px; }
+    .reader-review-dialog[data-mode="archive"] > header { top: -16px; margin: -16px -16px 18px; padding: 12px 16px; }
     .reader-review-dialog h2 { font-size: 21px; }
     .reader-review-dialog .reader-archive-filters { grid-template-columns: repeat(2, minmax(0, 1fr)); padding: 12px; gap: 10px; }
     .reader-review-dialog .reader-archive-overview { gap: 16px; }

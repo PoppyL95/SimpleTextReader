@@ -216,6 +216,18 @@ try {
             await mobile.select('#archive-layout', 'cards'); await mobile.screenshot({ path: '/tmp/hals-archive-mobile.png' });
             await mobile.select('#archive-sort', 'finished-desc'); assert.deepEqual(await titles(mobile), recentTitles);
             for (const target of [page, mobile]) {
+                const pinnedClose = await target.evaluate(() => {
+                    const dialog = document.querySelector('.reader-review-dialog');
+                    dialog.scrollTop = dialog.scrollHeight;
+                    const close = dialog.querySelector('[data-action="close"]');
+                    const bounds = close.getBoundingClientRect(), panel = dialog.getBoundingClientRect();
+                    return { scrolled: dialog.scrollTop > 0, visible: bounds.top >= panel.top && bounds.bottom <= panel.bottom,
+                        reachable: close.contains(document.elementFromPoint(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2)) };
+                });
+                assert(pinnedClose.scrolled && pinnedClose.visible && pinnedClose.reachable, 'close must remain visible and clickable after scrolling on desktop and mobile');
+                await target.click('[data-action="close"]');
+                assert.equal(await target.$eval('#reader-review-overlay', overlay => overlay.hidden), true);
+                await archive(target);
                 assert.equal(await target.$('#archive-platform'), null);
                 assert.deepEqual(await target.$$eval('#archive-sort option', options => options.map(option => option.textContent)),
                     ['读完时间（新→旧）', '读完时间（旧→新）', '书名', '评价']);
