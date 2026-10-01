@@ -8,7 +8,7 @@ export const TENCENT_HEADERS = ['提交时间（自动）', '书名（必填）'
     '补充标签', '平台（必填）', '是否看完（必填）', '提交者（自动）'];
 
 /** Only invented records. The date cell exercises Excel's typed date format. */
-export async function sampleWorkbook({ headers = TENCENT_HEADERS, extraColumns = false } = {}) {
+export async function sampleWorkbook({ headers = TENCENT_HEADERS, extraColumns = false, anotherSubmission = false } = {}) {
     headers = [...headers, ...(extraColumns ? ['感想', '保留测试列'] : [])];
     const first = { title: '测试书', author: '测试作者', characters: '虚构主角', rating: '值得多刷', perspective: '女主',
         relationship: '1v1', background: '古代', ancient: '修仙, 武侠江湖', style: '小甜饼, 年龄差（年下/年上）',
@@ -21,5 +21,6 @@ export async function sampleWorkbook({ headers = TENCENT_HEADERS, extraColumns =
     const data = [headers, row(first, { value: new Date('2026-09-30T12:30:00Z'), format: 'yyyy-mm-dd hh:mm:ss' }, '导入的感想'),
         row(second, '2026-10-01 13:30:00'), row({ ...first, title: '错误行', author: '' }, '错误日期'),
         row(first, '2026-09-30T12:30:00Z', '重复导入不能覆盖原感想')];
+    if (anotherSubmission) data.push(row(first, '2026-10-02T12:30:00Z', '同书另一条感想完整保留'));
     return writeExcelFile(data).toBuffer();
 }

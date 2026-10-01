@@ -1,3 +1,4 @@
+import { mobilePaging } from "./reader-page-turn.js";
 import * as CONFIG from '../../config/index.js';
 import { readerSync } from '../api/reader-sync.js';
 import { readingTracker } from '../api/reading-tracker.js';
@@ -22,7 +23,7 @@ function select(options, value = '') {
 }
 function calendarDate(date) { return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`; }
 function today() { return calendarDate(new Date()); }
-function warningText(warning) { return `${warning.label}${warning.value ? `：${warning.value}` : ''}（${warning.message}）`; }
+function warningText(warning) { if (!warning.label) return warning.message; return `${warning.label}${warning.value ? `：${warning.value}` : ''}（${warning.message}）`; }
 const RATING_TONES = { '值得多刷': 'favorite', '可圈可点': 'good', '文荒可看': 'okay', '看不下去': 'muted', '踩我雷点 滚': 'avoid' };
 function ratingBadge(value) {
     const badge = node('span', value || '未评价', 'reader-rating-badge');
@@ -63,6 +64,7 @@ class ReaderReviews {
         document.addEventListener('reader:book-uploaded', event => this.checkLinks(event.detail.id));
         const observer = new MutationObserver(() => this.scheduleEnd());
         observer.observe(CONFIG.DOM_ELEMENT.CONTENT_CONTAINER, { childList: true });
+        document.addEventListener('reader:screen-page', () => this.checkEnd());
         window.addEventListener('scroll', () => this.scheduleEnd(), { passive: true });
         window.addEventListener('resize', () => this.position()); window.visualViewport?.addEventListener('resize', () => this.position());
         setInterval(() => {
@@ -113,6 +115,10 @@ class ReaderReviews {
         this.shell(recordId ? '编辑读书记录' : '读完卡片', 'card'); this.status.textContent = '正在读取…';
         try {
             readingTracker.tick(); await readingTracker.flush();
+            if (bookId && !recordId) {
+                const existing = await (await readerSync.request(`/archives?bookId=${encodeURIComponent(bookId)}`)).json();
+                recordId = existing[0]?.id ?? null;
+            }
             const record = recordId ? await (await readerSync.request(`/archives/${recordId}`)).json() : null;
             bookId = record ? record.bookId : bookId;
             const book = bookId ? await (await readerSync.request(`/books/${bookId}`)).json() : null;
@@ -235,7 +241,8 @@ class ReaderReviews {
             this.card = saved; this.dirty = false; this.status.textContent = '记录已保存'; this.saveButton.textContent = '保存修改';
         } catch (error) {
             if (this.card !== card) return;
-            this.status.textContent = error.status === 409 ? '这条档案已在另一处更新，请先保留感想，再重新打开。' : '尚未保存：请检查必填项、日期或连接后重试；输入内容仍保留。';
+            this.status.textContent = error.data?.code === 'archive_book_conflict' ? '这本 TXT 已有卡片；请先保留当前输入，再打开已有卡片。' : error.status === 409 ? '这条档案已在另一处更新，请先保留感想，再重新打开。' : '尚未保存：请检查必填项、日期或连接后重试；输入内容仍保留。';
+            if (error.data?.archiveId) this.status.append(button('打开已有卡片', () => { if (!this.dirty || window.confirm('当前输入尚未保存，已自行保留后打开已有卡片？')) this.openCard(card.bookId, error.data.archiveId); }, 'open-existing-card'));
         } finally { this.saving = false; saveButton.disabled = false; }
     }
     async requestDraft() {
@@ -279,14 +286,15 @@ class ReaderReviews {
     }
     checkEnd() {
         const bookId = readerSync.current;
+        if (mobilePaging.active && !mobilePaging.atEnd) return;
         if (!bookId || readerSync.suppressed || !CONFIG.VARS.IS_BOOK_OPENED || document.hidden || !this.overlay.hidden ||
             !readingTracker.lastInteraction || Date.now() - readingTracker.lastInteraction > 120000 ||
-            this.suggested.has(bookId) || CONFIG.VARS.CURRENT_PAGE !== CONFIG.VARS.TOTAL_PAGES) return;
+            this.suggested.has(bookId) || (!mobilePaging.active && CONFIG.VARS.CURRENT_PAGE !== CONFIG.VARS.TOTAL_PAGES)) return;
         const map = readerSync.maps.get(bookId), chunks = CONFIG.VARS.FILE_CONTENT_CHUNKS;
         let last = chunks.length - 1;
         while (last >= 0 && (!map?.source(last) || (typeof chunks[last] === 'object' && chunks[last].type === 'empty'))) last--;
         const paragraph = document.getElementById(`line${last}`), viewport = view();
-        if (!paragraph || paragraph.getBoundingClientRect().bottom > viewport.offsetTop + viewport.height + 3) return;
+        if (!mobilePaging.active && (!paragraph || paragraph.getBoundingClientRect().bottom > viewport.offsetTop + viewport.height + 3)) return;
         this.suggested.add(bookId);
         this.suggestion.replaceChildren(node('p', '读到末尾了，要留一张读完卡片吗？'), button('填写卡片', () => {
             this.suggestion.hidden = true; this.openCard(bookId);
@@ -442,7 +450,8 @@ class ReaderReviews {
         const cancel = button('返回档案', () => this.openArchive(), 'cancel-book-link');
         this.dialog.append(node('p', `为《${record.title}》选择原文；书名或作者不同也可以关联，档案里的评价、标签和感想会保留。`));
         try {
-            const books = await (await readerSync.request('/books')).json();
+            const [books, archives] = await Promise.all([readerSync.request('/books').then(r => r.json()), readerSync.request('/archives').then(r => r.json())]);
+            const occupied = new Set(archives.filter(card => card.bookId && card.id !== record.id).map(card => card.bookId));
             if (!active()) return;
             books.sort((a, b) => `${a.title}\0${a.author}`.localeCompare(`${b.title}\0${b.author}`, 'zh'));
             status.textContent = '';
@@ -464,7 +473,7 @@ class ReaderReviews {
                     this.paintLinks();
                     if (active()) await this.openArchive(`已为《${record.title}》关联《${book.title}》。`);
                 } catch (error) {
-                    if (active()) status.textContent = error.status === 409 ? '这条档案已在另一处更新，请返回档案后重新关联。' : '关联未完成，请检查连接或原文是否仍在书架后重试。';
+                    if (active()) status.textContent = error.data?.code === 'archive_book_conflict' ? error.data.error : error.status === 409 ? '这条档案已在另一处更新，请返回档案后重新关联。' : '关联未完成，请检查连接或原文是否仍在书架后重试。';
                 } finally { saving = false; confirm.disabled = !selectedId || selectedId === record.bookId; }
             }, 'confirm-book-link');
             confirm.classList.add('reader-review-primary'); confirm.disabled = true;
@@ -480,10 +489,11 @@ class ReaderReviews {
                 const matches = books.filter(book => `${book.title} ${book.author} ${book.filename}`.toLowerCase().includes(query));
                 for (const book of matches) {
                     const option = node('label', null, 'reader-archive-book-option');
-                    const radio = node('input'); radio.type = 'radio'; radio.name = 'archive-book'; radio.value = book.id; radio.checked = book.id === selectedId;
+                    const radio = node('input'); radio.type = 'radio'; radio.name = 'archive-book'; radio.value = book.id; radio.checked = book.id === selectedId; radio.disabled = occupied.has(book.id);
                     radio.addEventListener('change', () => { selectedId = book.id; updateSelection(); });
                     const details = node('div'); details.append(node('strong', book.title), node('span', book.author || '作者未识别'),
                         node('span', `${book.filename} · ${(book.size / 1024).toFixed(1)} KB · 上传于 ${book.createdAt.slice(0, 10)}`, 'reader-review-hint'));
+                    if (occupied.has(book.id)) details.append(node('span', '已有读书卡片，不能重复关联', 'reader-review-hint'));
                     option.append(radio, details); list.append(option);
                 }
                 if (!matches.length) list.append(node('p', books.length ? '没有匹配的书，试试其他关键词。' : '还没有已上传的 TXT，请先在书架上传，再回来关联。', 'reader-review-hint'));
@@ -536,7 +546,8 @@ class ReaderReviews {
             tr.append(node('td', messages.join('\n') || '可导入'));
             const association = node('td');
             if (row.candidates.length) {
-                const input = select([['', '不关联'], ...row.candidates.map(book => [book.id, book.filename])], this.importLinks[row.row] || '');
+                const input = select([['', '不关联'], ...row.candidates.map(book => [book.id, book.filename + (book.hasArchive ? '（已有卡片）' : '')])], this.importLinks[row.row] || '');
+                for (const option of input.options) if (row.candidates.some(book => book.id === option.value && book.hasArchive)) option.disabled = true;
                 input.setAttribute('aria-label', `第 ${row.row} 行关联书籍`); input.addEventListener('change', () => { this.importLinks[row.row] = input.value || null; }); association.append(input);
             } else association.append(node('span', '暂无对应 txt'));
             tr.append(association); body.append(tr);
@@ -571,9 +582,11 @@ class ReaderReviews {
     paintLinks() {
         this.links.replaceChildren(); this.links.hidden = this.linkQueue.size === 0;
         for (const [bookId, records] of this.linkQueue) {
-            const item = node('div'); item.append(node('p', `《${records[0].title}》有 ${records.length} 条同名同作者的既有档案。`),
+            const choice = node('select'); choice.setAttribute('aria-label', '选择唯一关联的档案');
+            for (const record of records) { const option = node('option', `记录 #${record.id} · ${record.submittedAt || '未填写日期'}`); option.value = record.id; choice.append(option); }
+            const item = node('div'); item.append(node('p', `《${records[0].title}》有 ${records.length} 条同名同作者档案，请选一张关联。`), choice,
                 button('关联原文', async () => {
-                    try { await this.json(`/books/${bookId}/archive-link`, { recordIds: records.map(record => record.id) }); this.linkQueue.delete(bookId); this.paintLinks(); if (this.mode === 'archive' && !this.overlay.hidden) this.loadArchive(); }
+                    try { await this.json(`/books/${bookId}/archive-link`, { recordIds: [Number(choice.value)] }); this.linkQueue.delete(bookId); this.paintLinks(); if (this.mode === 'archive' && !this.overlay.hidden) this.loadArchive(); }
                     catch { item.append(node('p', '关联未完成，请重新打开档案后重试。')); }
                 }, 'link-archives'), button('暂不关联', () => { this.dismissedLinks.add(bookId); this.linkQueue.delete(bookId); this.paintLinks(); }));
             this.links.append(item);

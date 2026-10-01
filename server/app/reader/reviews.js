@@ -88,6 +88,26 @@ function nullableCount(value, label) {
 }
 
 export class ReviewStore extends AnnotationStore {
+    async ensureUniqueArchives() {
+        // Retain every historical record; only the latest edited card keeps the TXT link.
+        const rows = (await this.db.execute('SELECT id,bookId,warnings FROM archives WHERE bookId IS NOT NULL ORDER BY updatedAt DESC,id DESC')).rows;
+        const seen = new Set(), statements = [];
+        for (const row of rows) {
+            if (seen.has(row.bookId)) {
+                const warnings = JSON.parse(row.warnings);
+                warnings.push({ kind: 'duplicate_book_link', message: '同一 TXT 已关联最近编辑的卡片，本记录保留内容并解除重复关联。' });
+                statements.push({ sql: 'UPDATE archives SET bookId=NULL,warnings=? WHERE id=?', args: [JSON.stringify(warnings), row.id] });
+            }
+            seen.add(row.bookId);
+        }
+        statements.push('CREATE UNIQUE INDEX IF NOT EXISTS archives_unique_book ON archives(bookId) WHERE bookId IS NOT NULL');
+        await this.db.batch(statements, 'write');
+    }
+    async assertAvailableBook(bookId, exceptId = null) {
+        if (!bookId) return;
+        const row = (await this.db.execute({ sql: 'SELECT id FROM archives WHERE bookId=? AND id<>?', args: [bookId, exceptId ?? 0] })).rows[0];
+        if (row) throw new ReaderError(409, '这本 TXT 已有读书卡片，请打开原卡片编辑。', { code: 'archive_book_conflict', archiveId: row.id });
+    }
     async ensureStats(bookId, text) {
         const existing = await this.db.execute({ sql: 'SELECT * FROM readingStats WHERE bookId=?', args: [bookId] });
         if (existing.rows[0]) return existing.rows[0];
@@ -147,6 +167,7 @@ export class ReviewStore extends AnnotationStore {
     }
     async createArchive(data, identity) {
         requireReader(identity); const record = await this.archiveValues(data), now = new Date().toISOString();
+        await this.assertAvailableBook(record.bookId);
         const draftRequest = await this.archiveDraftRequest(record.bookId, data.draftRequestId);
         if (draftRequest?.archiveId != null) throw new ReaderError(409, 'Draft request already belongs to an archive');
         const statements = [{ sql: `INSERT INTO archives
@@ -162,6 +183,7 @@ export class ReviewStore extends AnnotationStore {
         const existing = await this.archive(id);
         if (data.updatedAt !== existing.updatedAt) throw new ReaderError(409, 'Archive changed on another device; reload before saving');
         const record = await this.archiveValues({ ...existing, ...data, fields: { ...existing.fields, ...(data.fields || {}) } });
+        await this.assertAvailableBook(record.bookId, existing.id);
         const draftRequest = await this.archiveDraftRequest(record.bookId, data.draftRequestId);
         if (draftRequest?.archiveId != null && draftRequest.archiveId !== existing.id) throw new ReaderError(409, 'Draft request belongs to another archive');
         const now = new Date(Math.max(Date.now(), Date.parse(existing.updatedAt) + 1)).toISOString();
@@ -177,11 +199,13 @@ export class ReviewStore extends AnnotationStore {
     }
     async archiveCandidates(bookId) {
         const book = await this.book(bookId);
+        if ((await this.db.execute({ sql: 'SELECT id FROM archives WHERE bookId=?', args: [bookId] })).rows.length) return [];
         return (await this.db.execute({ sql: `SELECT id,title,author,submittedAt FROM archives WHERE bookId IS NULL AND title=? AND author=? ORDER BY id`, args: [book.title.trim(), book.author.trim()] })).rows;
     }
     async linkArchives(bookId, data, identity) {
         requireReader(identity); jsonObject(data);
-        if (!Array.isArray(data.recordIds) || !data.recordIds.length || data.recordIds.length > 5000) throw new ReaderError(400, 'Select archive records to link');
+        if (!Array.isArray(data.recordIds) || data.recordIds.length !== 1) throw new ReaderError(400, '每本 TXT 只能选择一张卡片关联');
+        await this.assertAvailableBook(bookId);
         const ids = [...new Set(data.recordIds.map(recordId))], candidates = await this.archiveCandidates(bookId);
         if (ids.some(id => !candidates.some(record => record.id === id))) throw new ReaderError(409, 'Archive no longer matches this book');
         const now = new Date().toISOString();
@@ -234,6 +258,23 @@ export class ReviewStore extends AnnotationStore {
         const { parseWorkbook } = await import('./workbook.js');
         const existing = (await this.db.execute('SELECT dedupeKey FROM archives WHERE dedupeKey IS NOT NULL')).rows.map(row => row.dedupeKey);
         const rows = await parseWorkbook(bytes, await this.list(), existing);
+        const occupied = new Set((await this.db.execute('SELECT bookId FROM archives WHERE bookId IS NOT NULL')).rows.map(row => row.bookId));
+        for (const row of rows) {
+            for (const candidate of row.candidates) candidate.hasArchive = occupied.has(candidate.id);
+            if (row.record?.bookId && occupied.has(row.record.bookId)) {
+                row.record.bookId = null;
+                row.warnings.push({ kind: 'duplicate_book_link', message: '该 TXT 已有卡片，本行会作为未关联档案导入，内容完整保留。' });
+            }
+        }
+        const matched = new Map();
+        for (const row of rows.filter(row => !row.errors.length && !row.duplicate && row.record?.bookId)) {
+            const previous = matched.get(row.record.bookId);
+            if (previous) {
+                const warning = { kind: 'duplicate_book_link', message: '同一 TXT 在本文件中有多条记录；选中多条时只关联第一条，其余内容完整保留为未关联档案。' };
+                if (!previous.warnings.some(item => item.kind === warning.kind)) previous.warnings.push(warning);
+                row.warnings.push(warning);
+            } else matched.set(row.record.bookId, row);
+        }
         const encoded = JSON.stringify(rows);
         if (Buffer.byteLength(encoded) > 16 * 1024 * 1024) throw new ReaderError(400, '预览内容过大，请分批导入');
         const previewId = randomUUID(), now = Date.now(), expiresAt = now + 1800000;
@@ -250,6 +291,7 @@ export class ReviewStore extends AnnotationStore {
         const rows = JSON.parse(preview.rows), selected = [...new Set(data.rows.map(recordId))].map(number => rows.find(row => row.row === number));
         if (selected.some(row => !row || row.errors.length || !row.record)) throw new ReaderError(400, '选择的记录中有错误，请先修正文件');
         const now = new Date().toISOString(), statements = [];
+        const occupied = new Set((await this.db.execute('SELECT bookId FROM archives WHERE bookId IS NOT NULL')).rows.map(row => row.bookId));
         for (const row of selected) {
             let bookId = data.links && row.row in data.links ? data.links[row.row] : row.record.bookId;
             if (bookId != null) {
@@ -258,12 +300,20 @@ export class ReviewStore extends AnnotationStore {
                 const book = await this.book(bookId);
                 if (book.title.trim() !== row.record.title || book.author.trim() !== row.record.author) throw new ReaderError(409, '书籍信息已变化，请重新预览');
             }
+            const warnings = [...row.warnings];
+            if (bookId && occupied.has(bookId)) {
+                bookId = null;
+                if (!warnings.some(warning => warning.kind === 'duplicate_book_link')) warnings.push({ kind: 'duplicate_book_link', message: '该 TXT 已关联另一张卡片，本记录保留内容并作为未关联档案导入。' });
+            }
+            // A skipped duplicate must not reserve the only association for a later new row.
+            const duplicate = (await this.db.execute({ sql: 'SELECT id FROM archives WHERE dedupeKey=?', args: [row.dedupeKey] })).rows.length;
+            if (bookId && !duplicate) occupied.add(bookId);
             const record = row.record;
             statements.push({ sql: `INSERT INTO archives
                 (bookId,title,author,startedAt,finishedAt,readingMs,wordCount,fields,reflection,source,submittedAt,dedupeKey,original,warnings,createdAt,updatedAt)
                 VALUES (?,?,?,?,?,?,?,?,?,'import',?,?,?,?,?,?) ON CONFLICT(dedupeKey) DO NOTHING RETURNING id`,
                 args: [bookId, record.title, record.author, record.startedAt, record.finishedAt, record.readingMs, record.wordCount,
-                    JSON.stringify(record.fields), record.reflection, record.submittedAt, row.dedupeKey, JSON.stringify(row.original), JSON.stringify(row.warnings), now, now] });
+                    JSON.stringify(record.fields), record.reflection, record.submittedAt, row.dedupeKey, JSON.stringify(row.original), JSON.stringify(warnings), now, now] });
         }
         const results = await this.db.batch(statements, 'write');
         const inserted = results.flatMap(result => result.rows.map(row => row.id));

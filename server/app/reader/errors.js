@@ -1,3 +1,3 @@
 export class ReaderError extends Error {
-    constructor(status, message) { super(message); this.status = status; }
+    constructor(status, message, details = {}) { super(message); this.status = status; Object.assign(this, details); }
 }

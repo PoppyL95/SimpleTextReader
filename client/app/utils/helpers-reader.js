@@ -15,6 +15,7 @@
  * @requires client/app/utils/base
  */
 
+import { mobilePaging } from "../modules/features/reader-page-turn.js";
 import { readerSync } from "../modules/api/reader-sync.js";
 import * as CONFIG from "../config/index.js";
 import { cbReg } from "../../../shared/core/callback/callback-registry.js";
@@ -118,11 +119,12 @@ export function GetScrollPositions(toSetHistory = true, gotoPageClicked = false)
     // console.log(`Top: ${scrollTop}px`);
 
     // Get the line number on top of the viewport
-    const curLineNumber = getTopLineNumber();
+    const curLineNumber = mobilePaging.active ? (mobilePaging.currentAnchor?.renderLine ?? 0) :
+        mobilePaging.narrow ? (mobilePaging.readAnchor()?.renderLine ?? getTopLineNumber()) : getTopLineNumber();
     // console.log("Current line: ", curLineNumber);
 
     // If the last line is visible, set the last title as active
-    const isLastLineVisible = isInViewport(CONFIG.DOM_ELEMENT.GET_LINE(CONFIG.VARS.FILE_CONTENT_CHUNKS.length - 1));
+    const isLastLineVisible = mobilePaging.active ? mobilePaging.atEnd : isInViewport(CONFIG.DOM_ELEMENT.GET_LINE(CONFIG.VARS.FILE_CONTENT_CHUNKS.length - 1));
 
     if (!CONFIG.VARS.GOTO_TITLE_CLICKED || gotoPageClicked) {
         // Remember the line number in history

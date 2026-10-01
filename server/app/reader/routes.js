@@ -67,6 +67,7 @@ export function readerRouter(store) {
         const status = error.status || 500;
         if (status >= 500) console.error('Reader operation failed:', error.code || error.name);
         res.status(status).json({ error: status >= 500 ? 'Reader operation failed' : error.message,
+            ...(error.code === 'archive_book_conflict' ? { code: error.code, archiveId: error.archiveId } : {}),
             ...(error.progress ? { progress: error.progress } : {}) });
     });
     return router;

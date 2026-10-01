@@ -19,6 +19,7 @@ try {
             const page = await context.newPage(); page.on('pageerror', error => errors.push(error.message));
             await page.setViewport(mobile ? { width: 390, height: 844, isMobile: true, hasTouch: true, deviceScaleFactor: 1 } : { width: 1280, height: 900 });
             await page.evaluateOnNewDocument(() => {
+                localStorage.setItem('mobile_reading_mode', 'scroll');
                 localStorage.setItem('show_toc', 'true');
                 localStorage.setItem('sidebar-splitview-toc-width', '32');
             });

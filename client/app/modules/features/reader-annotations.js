@@ -1,3 +1,4 @@
+import { mobilePaging } from "./reader-page-turn.js";
 /** Server-backed annotations. Original coordinates never depend on pagination or margin UI. */
 import * as CONFIG from '../../config/index.js';
 import { readerSync } from '../api/reader-sync.js';
@@ -60,6 +61,9 @@ class ReaderAnnotations {
         this.notice.setAttribute('role', 'status');
         document.body.append(this.menu, this.paragraphMenu, this.markers, this.panel, this.notice);
         this.content.addEventListener('click', event => this.captureParagraph(event));
+        document.addEventListener('reader:paragraph-tap', event => this.captureParagraph(event.detail));
+        document.addEventListener('reader:screen-page', () => { this.paragraphMenu.hidden = true; this.menu.hidden = true; this.schedulePosition(); });
+        document.addEventListener('reader:page-menu', () => { if (!document.body.classList.contains('reader-page-menu-open')) this.paragraphMenu.hidden = true; });
         this.content.addEventListener('scroll', () => {
             this.menu.hidden = true; this.paragraphMenu.hidden = true; this.schedulePosition();
         }, { passive: true });
@@ -284,7 +288,7 @@ class ReaderAnnotations {
         this.panel.style.top = `${view.top + 64}px`; this.panel.style.maxHeight = `${Math.max(100, view.height - 96)}px`;
         for (const marker of this.markers.children) {
             const node = document.getElementById(`line${marker.dataset.renderLine}`);
-            const rect = node?.getBoundingClientRect();
+            const rect = mobilePaging.active ? mobilePaging.visibleRect(node) : node?.getBoundingClientRect();
             marker.hidden = !CONFIG.VARS.IS_BOOK_OPENED || !rect || rect.bottom < view.top || rect.top > view.top + view.height;
             if (narrow && rect && (rect.top < readingRect.top || rect.top + 28 * (Number(marker.dataset.anchorIndex) + 1) > readingRect.bottom)) marker.hidden = true;
             if (rect) {

@@ -19,6 +19,7 @@ import * as CONFIG from "../../config/index.js";
 import { ICONS } from "../../config/icons.js";
 import { cbReg } from "../../../../shared/core/callback/callback-registry.js";
 import { TextProcessor } from "../text/text-processor.js";
+import { mobilePaging } from "./reader-page-turn.js";
 import { getFootnotes } from "./footnotes.js";
 import { MessageIndicator } from "../components/message-indicator.js";
 import {
@@ -232,49 +233,51 @@ export const reader = {
             // window.removeEventListener("resize", this._updateColumnLayout.bind(this));
             // window.addEventListener("resize", this._updateColumnLayout.bind(this));
 
-            const contentChunks = CONFIG.VARS.FILE_CONTENT_CHUNKS;
-            const maxLines = contentChunks.length;
+            if (mobilePaging.active) { mobilePaging.render(); return; }
             const [startIndex, endIndex] = this._getCurrentPageIndices();
-            if (startIndex === -1 || endIndex === -1) {
-                throw new Error("Invalid page indices");
-            }
+            if (startIndex === -1 || endIndex === -1) throw new Error("Invalid page indices");
+            this.renderRange(startIndex, endIndex);
+        } catch (error) {
+            console.error("Error showing page content:", error);
+        }
+    },
 
-            CONFIG.DOM_ELEMENT.CONTENT_CONTAINER.innerHTML = "";
+    renderRange(startIndex, endIndex) {
+        const contentChunks = CONFIG.VARS.FILE_CONTENT_CHUNKS;
+        const maxLines = contentChunks.length;
+        CONFIG.DOM_ELEMENT.CONTENT_CONTAINER.innerHTML = "";
 
-            // process line by line - fast
-            if (maxLines > 0) {
-                for (let j = startIndex; j < endIndex; j++) {
-                    const currentLine = contentChunks[j];
-                    if (typeof currentLine === "object") {
-                        // v1.6.4 and above
-                        const [processedContent, lineType] = TextProcessor.createDOM(currentLine);
+        // process line by line - fast
+        if (maxLines > 0) {
+            for (let j = startIndex; j < endIndex; j++) {
+                const currentLine = contentChunks[j];
+                if (typeof currentLine === "object") {
+                    // v1.6.4 and above
+                    const [processedContent, lineType] = TextProcessor.createDOM(currentLine);
 
+                    if (lineType === "e" && processedContent.innerHTML.trim() === "") {
+                        continue;
+                    }
+                    CONFIG.DOM_ELEMENT.CONTENT_CONTAINER.appendChild(processedContent);
+                } else {
+                    // v1.6.3 and below
+                    if (currentLine.trim()) {
+                        const [processedContent, lineType] = TextProcessor.processAndCreateDOM(
+                            currentLine,
+                            j,
+                            j < CONFIG.VARS.TITLE_PAGE_LINE_NUMBER_OFFSET || j === maxLines - 1
+                        );
                         if (lineType === "e" && processedContent.innerHTML.trim() === "") {
                             continue;
                         }
                         CONFIG.DOM_ELEMENT.CONTENT_CONTAINER.appendChild(processedContent);
-                    } else {
-                        // v1.6.3 and below
-                        if (currentLine.trim()) {
-                            const [processedContent, lineType] = TextProcessor.processAndCreateDOM(
-                                currentLine,
-                                j,
-                                j < CONFIG.VARS.TITLE_PAGE_LINE_NUMBER_OFFSET || j === maxLines - 1
-                            );
-                            if (lineType === "e" && processedContent.innerHTML.trim() === "") {
-                                continue;
-                            }
-                            CONFIG.DOM_ELEMENT.CONTENT_CONTAINER.appendChild(processedContent);
-                        }
                     }
                 }
             }
-
-            // Set up footnote
-            getFootnotes();
-        } catch (error) {
-            console.error("Error showing page content:", error);
         }
+
+        // Set up footnote
+        getFootnotes();
     },
 
     /**
@@ -303,6 +306,7 @@ export const reader = {
      * @public
      */
     generatePagination() {
+        if (mobilePaging.active) { mobilePaging.controls(); return; }
         // Save the existing processing indicator if it exists
         const existingProcessing = CONFIG.DOM_ELEMENT.PAGINATION_INDICATOR;
 
@@ -498,6 +502,7 @@ export const reader = {
      * @public
      */
     gotoPrevPage(toBottom = false) {
+        if (mobilePaging.active) return mobilePaging.turn(-1);
         if (CONFIG.VARS.CURRENT_PAGE > 1) {
             this.gotoPage(CONFIG.VARS.CURRENT_PAGE - 1, toBottom ? "bottom" : "top");
             return true;
@@ -512,6 +517,7 @@ export const reader = {
      * @public
      */
     gotoNextPage(toBottom = false) {
+        if (mobilePaging.active) return mobilePaging.turn(1);
         if (CONFIG.VARS.CURRENT_PAGE < CONFIG.VARS.TOTAL_PAGES) {
             this.gotoPage(CONFIG.VARS.CURRENT_PAGE + 1, toBottom ? "bottom" : "top");
             return true;
@@ -526,6 +532,7 @@ export const reader = {
      * @public
      */
     gotoPage(page, scrollTo = "top") {
+        if (mobilePaging.active) { return mobilePaging.gotoLine(CONFIG.VARS.PAGE_BREAKS[Math.max(0, Math.min(Number(page) - 1, CONFIG.VARS.TOTAL_PAGES - 1))] || 0); }
         CONFIG.VARS.CURRENT_PAGE = isNaN(page)
             ? CONFIG.VARS.CURRENT_PAGE
             : Math.max(1, Math.min(page, CONFIG.VARS.TOTAL_PAGES));
@@ -588,6 +595,7 @@ export const reader = {
      * @public
      */
     async gotoLine(lineNumber, isTitle = true) {
+        if (mobilePaging.active) return mobilePaging.gotoLine(lineNumber);
         // Find the page number to jump to
         // console.log(`lineNumber: ${lineNumber}, isTitle: ${isTitle}`);
 
@@ -721,6 +729,7 @@ export const reader = {
      * @private
      */
     async gotoChapterTitleLine(lineNum) {
+        if (mobilePaging.active) return mobilePaging.gotoLine(Number(lineNum));
         if (!isNaN(lineNum)) {
             await new Promise(async (resolve) => {
                 await this.gotoLine(lineNum);
@@ -743,8 +752,12 @@ export const reader = {
      * Toggles infinite scroll mode
      * @public
      */
+    onMobilePageChanged(save = true) {
+        GetScrollPositions(save, true);
+    },
+
     toggleInfiniteScroll() {
-        if (CONFIG.CONST_CONFIG.INFINITE_SCROLL_MODE) {
+        if (CONFIG.CONST_CONFIG.INFINITE_SCROLL_MODE && !mobilePaging.active) {
             this._initializePageScroll();
         } else {
             this._destroyPageScroll();

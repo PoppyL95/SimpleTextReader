@@ -67,4 +67,37 @@
     .reader-note-marker.has-notes { width: 18px; height: 28px; font-size: 14px; line-height: 26px; }
     body.reader-mobile-toc-open #reader-note-markers { visibility: hidden; }
     #reader-paragraph-menu button { min-height: 44px; }
+    body.reader-page-mode #content {
+        display: block; flex: none; height: calc(var(--reader-page-height, 640px) + 24px) !important;
+        padding: 12px 20px; overflow: hidden; scroll-behavior: auto;
+        column-count: auto !important; column-width: var(--reader-page-column, 350px);
+        column-gap: 40px; column-fill: auto; touch-action: pan-y pinch-zoom;
+    }
+    body.reader-page-mode .sidebar-splitview-outer { touch-action: pan-y pinch-zoom; }
+    body.reader-page-mode #content p { break-inside: auto; orphans: 1; widows: 1; }
+    body.reader-page-mode #content h2 { break-after: avoid; }
+    body.reader-page-mode #pagination {
+        display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 0 12px;
+        background: var(--bgColor);
+    }
+    body.reader-page-mode #pagination button {
+        min-height: 44px; border: 0; padding: 0 10px; background: transparent;
+        color: var(--fontColor); font: 13px/1.5 var(--fontFamily_ui);
+    }
+    body.reader-page-mode #pagination button:disabled { opacity: .4; }
+    body.reader-page-mode.reader-mobile-book-open:not(.reader-page-menu-open) :is(#reader-mobile-toolbar, #reader-review-toolbar, #main-btn-wrapper) {
+        display: none !important;
+    }
+    body.reader-page-mode:not(.reader-page-menu-open) #pagination > button:not(#reader-screen-page-status) {
+        visibility: hidden; pointer-events: none;
+    }
+    body.reader-page-mode:not(.reader-page-menu-open) #reader-screen-page-status { opacity: .65; margin: auto; }
+    body.reader-mobile-book-open #reader-sync-status {
+        left: 12px; right: auto; bottom: calc(8px + env(safe-area-inset-bottom)); max-width: 135px;
+    }
+    body.reader-mobile-book-open :is(#reader-finish-suggestion, #reader-archive-links) {
+        left: 12px; bottom: calc(104px + env(safe-area-inset-bottom));
+        max-width: calc(100vw - 24px); box-sizing: border-box;
+    }
 }
+#settingLabel-setting_mobile_reading_mode::before { content: "手机阅读方式"; }

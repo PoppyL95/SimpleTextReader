@@ -1,3 +1,4 @@
+import { mobilePaging } from "./reader-page-turn.js";
 /**
  * @fileoverview Settings module for managing UI and style configurations.
  *
@@ -152,6 +153,14 @@ const SETTINGS_SCHEMA = [
         bind: "CONFIG.CONST_CONFIG.INFINITE_SCROLL_MODE",
         default: CONFIG.CONST_CONFIG.INFINITE_SCROLL_MODE_DEFAULT,
         persist: true,
+    },
+
+    {
+        key: "mobile_reading_mode", type: "select", tab: "general",
+        label: "setting_mobile_reading_mode", default: "pages",
+        options: ["pages", "scroll"], optionLabels: ["翻页", "滚动"], persist: true,
+        getValue: function ($input) { return $input.closest(".select").children(".select-options").children(".is-selected").attr("rel") || this.values.mobile_reading_mode; },
+        onApply: function (value) { mobilePaging.setMode(value); },
     },
 
     // ==== Theme Tab (Light) ====
@@ -576,7 +585,7 @@ const MENU_SCHEMA = [
             {
                 section: "setting_separator_behavior",
                 order: 2,
-                items: ["auto_open_last_book", "infinite_scroll_mode"],
+                items: ["auto_open_last_book", "infinite_scroll_mode", "mobile_reading_mode"],
             },
         ],
     },
@@ -1281,6 +1290,7 @@ class SettingsMenu {
      * Initializes selectors for the settings menu (needed for dropdown items).
      */
     #initializeSelectors() {
+        getDropdownSelector($("#setting_mobile_reading_mode"), this.settingsObj.values.mobile_reading_mode === "scroll" ? 1 : 0, [{ func: this.settingsObj.saveSettings.bind(this.settingsObj), params: [false, false] }]);
         // Language selector
         const languageIndex =
             this.settingsObj.values.ui_language === "auto" || !this.settingsObj.respectUserLangSetting

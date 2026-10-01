@@ -1,3 +1,4 @@
+import { mobilePaging } from "../features/reader-page-turn.js";
 import * as CONFIG from '../../config/index.js';
 import { createLineMap } from '../../../../shared/core/reader/coordinates.js';
 import { TextProcessorCore } from '../../../../shared/core/text/text-processor-core.js';
@@ -141,20 +142,33 @@ class ReaderSync {
         document.dispatchEvent(new Event('reader:book-opened'));
     }
     scrollToOffset(renderLine, offset, raw) {
+        if (mobilePaging.active) { mobilePaging.gotoOffset(renderLine, offset, false); return; }
         const element = document.getElementById(`line${renderLine}`);
         if (!element) return;
         const displayed = element.textContent;
         const start = raw.indexOf(displayed);
         let remaining = Math.max(0, offset - Math.max(0, start));
+        if (mobilePaging.narrow) {
+            const characters = this.maps.get(this.current)?.characters(renderLine, displayed);
+            const found = characters?.findIndex(char => char.end > offset);
+            if (found != null) remaining = found < 0 ? Math.max(0, displayed.length - 1) : found;
+        }
         const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
         for (let node = walker.nextNode(); node; node = walker.nextNode()) {
             if (remaining > node.length) { remaining -= node.length; continue; }
             const range = document.createRange(); range.setStart(node, remaining); range.collapse(true);
             const rect = range.getBoundingClientRect();
-            window.scrollBy(0, rect.top - 8); break;
+            if (mobilePaging.narrow) {
+                const content = CONFIG.DOM_ELEMENT.CONTENT_CONTAINER;
+                content.scrollBy({ top: rect.top - content.getBoundingClientRect().top - 12, behavior: 'instant' });
+            } else window.scrollBy(0, rect.top - 8);
+            break;
         }
     }
     viewportOffset(renderLine, raw) {
+        if (mobilePaging.narrow) {
+            const anchor = mobilePaging.readAnchor(); return anchor?.renderLine === renderLine ? anchor.offset : 0;
+        }
         const element = document.getElementById(`line${renderLine}`);
         if (!element || element.getBoundingClientRect().top >= 0) return 0;
         const rect = element.getBoundingClientRect();
@@ -170,8 +184,10 @@ class ReaderSync {
             Date.now() - this.lastInteraction > 120000 || !Number.isInteger(renderLine)) return;
         const map = this.maps.get(book.id); if (!map) return;
         this.conflict = false;
-        const line = map.toOriginal(renderLine);
-        const offset = this.viewportOffset(renderLine, map.raw[line - 1]);
+        const anchor = mobilePaging.active ? mobilePaging.currentAnchor : mobilePaging.narrow ? mobilePaging.anchor() : null;
+        renderLine = anchor?.renderLine ?? renderLine;
+        const line = anchor?.line ?? map.toOriginal(renderLine);
+        const offset = anchor?.offset ?? this.viewportOffset(renderLine, map.raw[line - 1]);
         const previous = this.pending[book.id] || book.progress;
         if (previous?.line === line && previous?.offset === offset) return;
         const title = [...CONFIG.VARS.ALL_TITLES].reverse().find(item => item[1] <= renderLine)?.[0] || '';

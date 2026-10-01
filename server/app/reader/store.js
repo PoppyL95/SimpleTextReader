@@ -63,6 +63,7 @@ export class ReaderStore extends ReviewStore {
         `);
         await this.db.executeMultiple(ANNOTATION_SCHEMA);
         await this.db.executeMultiple(REVIEW_SCHEMA);
+        await this.ensureUniqueArchives();
         return this;
     }
     async list() {
