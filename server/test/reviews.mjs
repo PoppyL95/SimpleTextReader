@@ -84,6 +84,25 @@ for (const prefix of ['', '/reader']) test(`phase 3 API at ${prefix || '/'}`, as
             assert.equal((await reader(`/books/${later.id}/archive-link`, { method: 'POST', ...data({ recordIds: [record.id] }) })).status, 200);
             assert.equal((await (await hals(`/archives/${record.id}`)).json()).bookId, later.id);
         });
+        await t.test('manual linking accepts different metadata and preserves the archive with conflict checks', async () => {
+            const original = await (await reader('/archives', { method: 'POST', ...data({ title: '档案里的别名', author: '档案笔名',
+                finishedAt: '2026-09-25', reflection: '保留手写的读后感', fields: { rating: '值得多刷', extraTags: '保留标签' } }) })).json();
+            const patch = (changes, identity = reader) => identity(`/archives/${original.id}`, { method: 'PATCH', ...data({ updatedAt: original.updatedAt, ...changes }) });
+            assert.equal((await patch({ bookId: '0'.repeat(64) })).status, 404);
+            assert.equal((await patch({ bookId: book.id }, hals)).status, 403);
+            const response = await patch({ bookId: book.id }); assert.equal(response.status, 200);
+            const linked = await response.json(); assert.equal(linked.bookId, book.id); assert(linked.hasBook);
+            for (const key of ['title', 'author', 'finishedAt', 'reflection', 'fields', 'original', 'source']) assert.deepEqual(linked[key], original[key], key);
+            assert.equal((await patch({ bookId: other.id })).status, 409, 'an old picker must not overwrite a newer association');
+            const changed = await (await reader(`/archives/${original.id}`, { method: 'PATCH', ...data({ updatedAt: linked.updatedAt, bookId: other.id }) })).json();
+            assert.equal(changed.bookId, other.id); assert.equal(changed.reflection, original.reflection);
+            assert.equal((await reader(`/archives/${original.id}`, { method: 'DELETE' })).status, 204);
+            const imported = (await (await hals('/archives')).json()).find(record => record.title === '未上传书');
+            const raw = await (await hals(`/archives/${imported.id}`)).json();
+            const relinked = await (await reader(`/archives/${raw.id}`, { method: 'PATCH', ...data({ updatedAt: raw.updatedAt, bookId: other.id }) })).json();
+            assert.equal(relinked.bookId, other.id);
+            for (const key of ['title', 'author', 'finishedAt', 'reflection', 'fields', 'original', 'warnings', 'submittedAt', 'source']) assert.deepEqual(relinked[key], raw[key], `imported ${key}`);
+        });
         await t.test('draft handoff snapshots notes; request affinity, late responses and idempotence', async () => {
             const note = await (await hals(`/books/${book.id}/notes`, { method: 'POST', ...data({ line: 3, text: '为起草准备的批注' }) })).json();
             requestA = await (await reader(`/books/${book.id}/draft-request`, { method: 'POST', ...data({ archiveId: archive.id }) })).json();

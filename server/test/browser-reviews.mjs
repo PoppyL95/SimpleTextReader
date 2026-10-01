@@ -160,23 +160,27 @@ try {
             await page.select('#archive-layout', 'cards');
             await page.waitForSelector('.reader-archive-grid');
             const samples = [
-                { title: '折纸星河', rating: '值得多刷', perspective: '主受', relationship: '1v1', background: '未来', future: ['星际', 'ABO'], style: ['青梅竹马', '暗恋酸涩'], extraTags: '久别重逢 双向救赎,星际冒险' },
-                { title: '雾色回廊', rating: '可圈可点', perspective: '女主', relationship: '无cp', background: '古代', ancient: ['朝堂权谋'], style: ['论坛体'], extraTags: '悬疑 破案,群像' },
-                { title: '城市慢车', rating: '文荒可看', perspective: '双视角', relationship: '1v1', background: '现代', modern: ['职场'], style: ['小甜饼', '天降'], extraTags: '日常 治愈' },
-                { title: '远山来信', rating: '看不下去', perspective: '主攻', relationship: 'np', background: '古代', ancient: ['武侠江湖'], style: ['追妻火葬场'], extraTags: '节奏缓慢' },
-                { title: '月下空城', rating: '踩我雷点 滚', perspective: '男主', relationship: '1v1', background: '现代', modern: ['豪门'], style: ['替身/白月光'], extraTags: '误会过多' },
+                { title: '折纸星河', finishedAt: '2026-10-01', rating: '值得多刷', perspective: '主受', relationship: '1v1', background: '未来', future: ['星际', 'ABO'], style: ['青梅竹马', '暗恋酸涩'], extraTags: '久别重逢 双向救赎,星际冒险' },
+                { title: '雾色回廊', finishedAt: '2026-09-10', rating: '可圈可点', perspective: '女主', relationship: '无cp', background: '古代', ancient: ['朝堂权谋'], style: ['论坛体'], extraTags: '悬疑 破案,群像' },
+                { title: '城市慢车', finishedAt: '2026-09-20', rating: '文荒可看', perspective: '双视角', relationship: '1v1', background: '现代', modern: ['职场'], style: ['小甜饼', '天降'], extraTags: '日常 治愈' },
+                { title: '远山来信', finishedAt: '2026-09-20', rating: '看不下去', perspective: '主攻', relationship: 'np', background: '古代', ancient: ['武侠江湖'], style: ['追妻火葬场'], extraTags: '节奏缓慢' },
+                { title: '月下空城', finishedAt: '2026-09-05', rating: '踩我雷点 滚', perspective: '男主', relationship: '1v1', background: '现代', modern: ['豪门'], style: ['替身/白月光'], extraTags: '误会过多' },
             ];
             await page.evaluate(async samples => {
                 const { readerReviews } = await import('./client/app/modules/features/reader-reviews.js');
                 for (const [index, sample] of samples.entries()) {
-                    const { title, ...fields } = sample;
-                    await readerReviews.json('/archives', { title, author: `虚构作者${index + 1}`, finishedAt: '2026-09-20',
+                    const { title, finishedAt, ...fields } = sample;
+                    await readerReviews.json('/archives', { title, author: `虚构作者${index + 1}`, finishedAt, reflection: index === 0 ? '手写感想要保留' : '',
                         fields: { ...fields, platform: '晋江', completed: '已看完' } });
                 }
                 await readerReviews.loadArchive();
             }, samples);
             const visibleFields = await page.$eval('.reader-archive-grid', grid => grid.textContent);
             for (const value of ['主受', '1v1', 'ABO', '青梅竹马', '久别重逢']) assert(visibleFields.includes(value), `${value} should be visible without opening the editor`);
+            const titles = page => page.evaluate(() => [...document.querySelectorAll('.reader-archive-item .reader-archive-book-title h3')].map(element => element.textContent));
+            const recentTitles = ['折纸星河', '测试书', '远山来信', '城市慢车', '雾色回廊', '月下空城', '未上传书'];
+            await page.select('#archive-sort', 'finished');
+            assert.deepEqual(await titles(page), recentTitles, 'recent completion order needs descending dates, stable ties and undated records last');
             async function assertRatingColors(page, theme) {
                 // Read one live DOM snapshot: a pending filter response can
                 // replace cards between Puppeteer's query and $$eval callback.
@@ -193,11 +197,14 @@ try {
             await page.click('.reader-archive-chips.style [data-filter-tag="青梅竹马"]');
             assert.equal(await page.$$eval('.reader-archive-item', items => items.length), 1);
             assert.equal(await page.$eval('#archive-mode', select => select.value), 'tag');
-            await page.click('[data-action="clear-tag"]'); await page.select('#archive-mode', 'book');
+            await page.click('[data-action="clear-tag"]');
+            assert.deepEqual(await titles(page), recentTitles, 'tag grouping should honor the selected sort');
+            await page.select('#archive-mode', 'book');
             await assertRatingColors(page, 'light'); await page.screenshot({ path: '/tmp/hals-archive-cards-light.png' });
             await page.evaluate(() => document.documentElement.setAttribute('data-theme', 'dark'));
             await page.select('#archive-layout', 'table'); await page.waitForSelector('.reader-archive-table');
             assert.equal(await page.$$eval('.reader-archive-table .reader-rating-badge', badges => badges.length), 7);
+            assert.deepEqual(await titles(page), recentTitles, 'table and cards should have the same order');
             await page.screenshot({ path: '/tmp/hals-archive-table.png' });
             await mobile.click('[data-action="close"]'); await archive(mobile);
             await mobile.select('#archive-layout', 'table');
@@ -205,6 +212,64 @@ try {
             assert(mobileTable.scroll > mobileTable.width, 'wide tables should scroll inside their own region');
             assert(mobileTable.dialogScroll <= mobileTable.dialogWidth + 1, 'the mobile review dialog must not overflow horizontally');
             await mobile.select('#archive-layout', 'cards'); await mobile.screenshot({ path: '/tmp/hals-archive-mobile.png' });
+            await mobile.select('#archive-sort', 'finished'); assert.deepEqual(await titles(mobile), recentTitles);
+
+            await page.click('[data-action="close"]');
+            const linkedBookId = await upload(page, '第一章\n\n这是手动关联测试的虚构原文。', '《纸船夜航》by秋舟.txt');
+            const linkedBook = await api(`/books/${linkedBookId}`); assert.equal(linkedBook.title, '纸船夜航'); assert.equal(linkedBook.author, '秋舟');
+            const cachedMetadata = await page.evaluate(async id => (await import('./client/app/modules/api/reader-catalog.js')).catalogEntries().find(book => book.id === id), linkedBookId);
+            assert.equal(cachedMetadata.title, linkedBook.title); assert.equal(cachedMetadata.author, linkedBook.author);
+            await archive(page);
+            assert.equal(await page.$eval('#archive-sort', select => select.value), 'finished', 'reopening archives should retain sorting');
+            const original = (await api('/archives')).find(record => record.title === '折纸星河');
+            const recordSelector = `.reader-archive-item[data-record-id="${original.id}"]`;
+            await page.click(`${recordSelector} [data-action="link-book"]`); await page.waitForSelector('#archive-book-search');
+            assert.equal(await page.$eval('[data-action="confirm-book-link"]', button => button.disabled), true);
+            await page.type('#archive-book-search', '没有这本虚构书');
+            assert.equal(await page.$$eval('input[name="archive-book"]', options => options.length), 0);
+            await page.$eval('#archive-book-search', input => { input.value = 'by秋舟'; input.dispatchEvent(new Event('input')); });
+            assert.equal(await page.$$eval('input[name="archive-book"]', options => options.length), 1, 'search should match the original filename');
+            await page.click(`input[name="archive-book"][value="${linkedBookId}"]`);
+            await page.screenshot({ path: '/tmp/hals-archive-book-link.png' });
+            await page.click('[data-action="cancel-book-link"]'); await page.waitForSelector(recordSelector);
+            assert.equal((await api(`/archives/${original.id}`)).bookId, null, 'cancel must not associate a book');
+            await page.click(`${recordSelector} [data-action="link-book"]`); await page.waitForSelector('#archive-book-search');
+            await page.click(`input[name="archive-book"][value="${linkedBookId}"]`); await page.click('[data-action="confirm-book-link"]');
+            await page.waitForSelector(`${recordSelector} [data-action="read-book"]`);
+            const linked = await api(`/archives/${original.id}`); assert.equal(linked.bookId, linkedBookId);
+            for (const key of ['title', 'author', 'finishedAt', 'reflection', 'fields', 'source', 'warnings']) assert.deepEqual(linked[key], original[key], `association must preserve ${key}`);
+            assert.deepEqual(await titles(page), recentTitles);
+            await page.click(`${recordSelector} [data-action="read-book"]`);
+            await page.waitForFunction(async id => (await import('./client/app/modules/api/reader-sync.js')).readerSync.current === id && document.querySelector('#reader-review-overlay').hidden, {}, linkedBookId);
+            assert((await page.$eval('#content', content => content.textContent)).includes('这是手动关联测试的虚构原文'));
+            await archive(page); await page.click(`${recordSelector} [data-action="link-book"]`); await page.waitForSelector('#archive-book-search');
+            assert.equal(await page.$eval(`input[name="archive-book"][value="${linkedBookId}"]`, input => input.checked), true);
+            await page.click(`input[name="archive-book"][value="${bookId}"]`); await page.click('[data-action="confirm-book-link"]');
+            await page.waitForSelector(recordSelector); assert.equal((await api(`/archives/${original.id}`)).bookId, bookId, 'an existing association can be changed');
+
+            await mobile.click(`${recordSelector} [data-action="link-book"]`); await mobile.waitForSelector('#archive-book-search');
+            const mobilePicker = await mobile.$eval('.reader-review-dialog', dialog => ({ scroll: dialog.scrollWidth, width: dialog.clientWidth }));
+            assert(mobilePicker.scroll <= mobilePicker.width + 1, 'the book picker should fit narrow screens');
+            await mobile.click(`input[name="archive-book"][value="${linkedBookId}"]`); await mobile.click('[data-action="confirm-book-link"]');
+            await mobile.waitForFunction(() => document.querySelector('.reader-review-status').textContent.includes('已在另一处更新'));
+            assert.equal((await api(`/archives/${original.id}`)).bookId, bookId, 'an old device must not overwrite the new association');
+            assert.equal(await mobile.$eval(`input[name="archive-book"][value="${linkedBookId}"]`, input => input.checked), true, 'a failed association should preserve the selection');
+            await mobile.screenshot({ path: '/tmp/hals-archive-book-link-mobile.png' });
+            await mobile.click('[data-action="cancel-book-link"]'); await mobile.waitForSelector(recordSelector);
+
+            await page.evaluate(async () => {
+                const { readerReviews } = await import('./client/app/modules/features/reader-reviews.js');
+                for (let index = 0; index < 31; index++) await readerReviews.json('/archives', {
+                    title: `分页虚构书${String(index).padStart(2, '0')}`, author: '分页笔名', finishedAt: `2026-08-${String(index + 1).padStart(2, '0')}`,
+                });
+                await readerReviews.loadArchive();
+            });
+            assert.equal((await titles(page)).length, 30); assert.equal((await titles(page))[0], recentTitles[0]);
+            await page.click('.reader-archive-pagination button:last-child');
+            assert.equal((await titles(page)).length, 8); assert.equal((await titles(page)).at(-1), '未上传书', 'undated records should be last across pagination');
+            await page.select('#archive-sort', 'default');
+            assert.equal(await page.$eval('.reader-archive-pagination button:first-child', button => button.disabled), true, 'changing sorting should reset pagination');
+            await page.select('#archive-sort', 'finished'); assert.equal((await titles(page))[0], '折纸星河');
             assert.deepEqual(errors, []); console.log(`Phase-three browser acceptance passed at ${prefix || '/'}`);
         } finally { await Promise.all(contexts.map(context => context.close())); await runtime.stop(); await rm(directory, { recursive: true, force: true }); }
     }

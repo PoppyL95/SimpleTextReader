@@ -383,9 +383,15 @@ export class TextProcessorCore {
 
         // Add book naming rule: book name.[author].txt
         const m = current.match(/^(?<name>.+)\.\[(?<author>.+)\]$/i);
+        // Accept spaced "by" and 《book》byAuthor, without splitting words
+        // such as "Goodbye". Parse before the Chinese author-token fallback.
+        const by = current.match(/^(?<name>.+)(?:\s+by(?=\s|[:：])|(?<=》)\s*by)\s*[:：]?\s*(?<author>.+)$/iu);
         if (m) {
-            bookInfo.bookName = m.groups["name"];
-            bookInfo.author = m.groups["author"];
+            bookInfo.bookName = BracketProcessor.processBracketsAndTrim(m.groups["name"]);
+            bookInfo.author = m.groups["author"].trim();
+        } else if (by) {
+            bookInfo.bookName = BracketProcessor.processBracketsAndTrim(by.groups["name"].replace(this.#REGEX_BOOKNAME_AD1, "").trim());
+            bookInfo.author = BracketProcessor.processBracketsAndTrim(by.groups["author"].replace(this.#REGEX_BOOKNAME_AD4, "").trim());
         } else if (this.#REGEX_IS_EASTERN.test(current)) {
             const pos = current.toLowerCase().lastIndexOf(CONFIG_CONST.CONST_FILE.AUTHOR_TOKEN_ZH);
             if (pos !== -1) {
@@ -406,53 +412,9 @@ export class TextProcessorCore {
                 bookInfo.bookName = BracketProcessor.processBracketsAndTrim(bookName);
                 bookInfo.author = BracketProcessor.processBracketsAndTrim(author);
             } else {
-                const pos2 = current.toLowerCase().lastIndexOf(CONFIG_CONST.CONST_FILE.AUTHOR_TOKEN_EN);
-                if (pos2 !== -1) {
-                    // this.#logger.log(current.slice(0, pos2).replace(this.#REGEX_BOOKNAME_AD1, "").replace(this.#REGEX_BOOKNAME_AD2, "").replace(this.#REGEX_BOOKNAME_AD3, "").trim());
-                    // this.#logger.log(current.slice(pos2 + 4).replace(this.#REGEX_BOOKNAME_AD4, "").replace(this.#REGEX_BOOKNAME_AD3, "").replace(this.#REGEX_BOOKNAME_AD2, "").trim());
-                    const bookName = current
-                        .slice(0, pos2)
-                        .replace(this.#REGEX_BOOKNAME_AD1, "")
-                        // .replace(this.#REGEX_BOOKNAME_AD2, "")
-                        // .replace(this.#REGEX_BOOKNAME_AD3, "")
-                        .trim();
-                    const author = current
-                        .slice(pos2 + 4)
-                        .replace(this.#REGEX_BOOKNAME_AD4, "")
-                        .trim();
-
-                    // Remove imbalanced brackets and their content, then strip balanced brackets
-                    bookInfo.bookName = BracketProcessor.processBracketsAndTrim(bookName);
-                    bookInfo.author = BracketProcessor.processBracketsAndTrim(author);
-                }
                 // No complete book name and author info
                 // Treat file name as book name and application name as author
                 bookInfo.bookName = BracketProcessor.processBracketsAndTrim(current);
-                bookInfo.author = "";
-            }
-        } else {
-            const pos = current.toLowerCase().lastIndexOf(CONFIG_CONST.CONST_FILE.AUTHOR_TOKEN_EN);
-            if (pos !== -1) {
-                // this.#logger.log(current.slice(0, pos).replace(this.#REGEX_BOOKNAME_AD1, "").replace(this.#REGEX_BOOKNAME_AD2, "").replace(this.#REGEX_BOOKNAME_AD3, "").trim());
-                // this.#logger.log(ccurrent.slice(pos + 4).replace(this.#REGEX_BOOKNAME_AD4, "").replace(this.#REGEX_BOOKNAME_AD3, "").replace(this.#REGEX_BOOKNAME_AD2, "").trim());
-                const bookName = current
-                    .slice(0, pos)
-                    .replace(this.#REGEX_BOOKNAME_AD1, "")
-                    // .replace(this.#REGEX_BOOKNAME_AD2, "")
-                    // .replace(this.#REGEX_BOOKNAME_AD3, "")
-                    .trim();
-                const author = current
-                    .slice(pos + 4)
-                    .replace(this.#REGEX_BOOKNAME_AD4, "")
-                    .trim();
-
-                // Remove imbalanced brackets and their content, then strip balanced brackets
-                bookInfo.bookName = BracketProcessor.processBracketsAndTrim(bookName);
-                bookInfo.author = BracketProcessor.processBracketsAndTrim(author);
-            } else {
-                // No complete book name and author info
-                // Treat file name as book name and application name as author
-                bookInfo.bookName = current;
                 bookInfo.author = "";
             }
         }

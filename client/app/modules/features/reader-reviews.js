@@ -296,6 +296,7 @@ class ReaderReviews {
     async openArchive(notice = '') {
         this.card = null; this.dirty = false; this.filter = this.filter || { mode: 'book', q: '', rating: '', platform: '', background: '', tag: '' };
         this.filter.layout ||= 'cards';
+        this.filter.sort ||= 'default';
         this.shell('读书档案', 'archive'); this.status.textContent = notice;
         const actions = node('div', null, 'reader-review-actions reader-archive-toolbar');
         this.fileInput = node('input'); this.fileInput.type = 'file'; this.fileInput.accept = '.xlsx'; this.fileInput.hidden = true; this.fileInput.id = 'reader-archive-import';
@@ -310,6 +311,8 @@ class ReaderReviews {
         mode.addEventListener('change', () => { this.filter.mode = mode.value; this.filter.tag = ''; this.loadArchive(); }); control('分组', mode);
         const layout = select([['cards', '卡片'], ['table', '表格']], this.filter.layout); layout.id = 'archive-layout'; layout.setAttribute('aria-label', '展示方式');
         layout.addEventListener('change', () => { this.filter.layout = layout.value; this.paintArchive(); }); control('展示', layout);
+        const sort = select([['default', '默认顺序'], ['finished', '最近读完优先']], this.filter.sort); sort.id = 'archive-sort'; sort.setAttribute('aria-label', '档案排序');
+        sort.addEventListener('change', () => { this.filter.sort = sort.value; this.archivePage = 0; this.paintArchive(); }); control('排序', sort);
         const search = node('input'); search.type = 'search'; search.placeholder = '书名或作者'; search.value = this.filter.q; search.setAttribute('aria-label', '搜索书名或作者');
         search.addEventListener('input', () => { this.filter.q = search.value; clearTimeout(this.searchTimer); this.searchTimer = setTimeout(() => this.loadArchive(), 250); }); control('查找', search, 'search');
         for (const key of ['rating', 'platform', 'background']) {
@@ -323,7 +326,7 @@ class ReaderReviews {
     async loadArchive() {
         const generation = this.archiveGeneration = (this.archiveGeneration || 0) + 1;
         try {
-            const params = new URLSearchParams(Object.entries(this.filter).filter(([key, value]) => !['mode', 'tag', 'layout'].includes(key) && value));
+            const params = new URLSearchParams(Object.entries(this.filter).filter(([key, value]) => !['mode', 'tag', 'layout', 'sort'].includes(key) && value));
             const records = await (await readerSync.request(`/archives?${params}`)).json();
             if (this.mode !== 'archive' || this.overlay.hidden || generation !== this.archiveGeneration) return;
             this.records = records; this.archivePage = 0; this.paintArchive();
@@ -339,7 +342,8 @@ class ReaderReviews {
             }
         }
         const records = this.records.filter(record => this.filter.mode !== 'tag' || !this.filter.tag || record.tags.includes(this.filter.tag));
-        if (this.filter.mode === 'book') records.sort((a, b) => `${a.title}\0${a.author}`.localeCompare(`${b.title}\0${b.author}`, 'zh') || b.id - a.id);
+        if (this.filter.sort === 'finished') records.sort((a, b) => (b.finishedAt || '').localeCompare(a.finishedAt || '') || b.id - a.id);
+        else if (this.filter.mode === 'book') records.sort((a, b) => `${a.title}\0${a.author}`.localeCompare(`${b.title}\0${b.author}`, 'zh') || b.id - a.id);
         const overview = node('div', null, 'reader-archive-overview');
         const bookCount = new Set(records.map(record => `${record.title}\0${record.author}`)).size;
         for (const [value, label] of [[records.length, '条记录'], [bookCount, '本书'], [records.filter(record => record.fields.completed === '已看完').length, '条已看完']]) {
@@ -409,6 +413,7 @@ class ReaderReviews {
         actions.append(button('查看 / 编辑', () => this.openCard(record.bookId, record.id), 'edit-record'));
         if (record.hasBook) actions.append(button('去阅读', () => this.readBook(record.bookId), 'read-book'));
         else actions.append(node('span', '无对应原文', 'reader-review-hint'));
+        actions.append(button(record.hasBook ? '更换关联原文' : '选一本书关联', () => this.openBookLink(record), 'link-book'));
         const remove = button('删除', () => this.deleteRecord(record), 'delete-record'); remove.classList.add('reader-review-danger'); actions.append(remove); return actions;
     }
     archiveTable(records) {
@@ -428,6 +433,65 @@ class ReaderReviews {
             const actions = node('td'); actions.append(this.archiveActions(record)); row.append(actions); body.append(row);
         }
         wrapper.append(table); return wrapper;
+    }
+    async openBookLink(record) {
+        const generation = this.linkGeneration = (this.linkGeneration || 0) + 1;
+        this.shell('选一本书关联', 'link'); this.status.textContent = '正在读取已上传的书籍…';
+        const status = this.status;
+        const active = () => this.mode === 'link' && !this.overlay.hidden && generation === this.linkGeneration;
+        const cancel = button('返回档案', () => this.openArchive(), 'cancel-book-link');
+        this.dialog.append(node('p', `为《${record.title}》选择原文；书名或作者不同也可以关联，档案里的评价、标签和感想会保留。`));
+        try {
+            const books = await (await readerSync.request('/books')).json();
+            if (!active()) return;
+            books.sort((a, b) => `${a.title}\0${a.author}`.localeCompare(`${b.title}\0${b.author}`, 'zh'));
+            status.textContent = '';
+            const search = node('input'); search.type = 'search'; search.id = 'archive-book-search'; search.placeholder = '搜索书名、作者或文件名';
+            const label = node('label', '查找已上传的 TXT', 'reader-archive-book-search'); label.htmlFor = search.id;
+            this.dialog.append(label, search);
+            const list = node('div', null, 'reader-archive-book-options');
+            let selectedId = record.bookId, saving = false;
+            const confirm = button('确认关联', async () => {
+                if (saving || !selectedId || selectedId === record.bookId) return;
+                const book = books.find(book => book.id === selectedId);
+                saving = true; confirm.disabled = true;
+                try {
+                    await this.json(`/archives/${record.id}`, { bookId: book.id, updatedAt: record.updatedAt }, 'PATCH');
+                    for (const [bookId, candidates] of this.linkQueue) {
+                        const remaining = candidates.filter(candidate => candidate.id !== record.id);
+                        if (remaining.length) this.linkQueue.set(bookId, remaining); else this.linkQueue.delete(bookId);
+                    }
+                    this.paintLinks();
+                    if (active()) await this.openArchive(`已为《${record.title}》关联《${book.title}》。`);
+                } catch (error) {
+                    if (active()) status.textContent = error.status === 409 ? '这条档案已在另一处更新，请返回档案后重新关联。' : '关联未完成，请检查连接或原文是否仍在书架后重试。';
+                } finally { saving = false; confirm.disabled = !selectedId || selectedId === record.bookId; }
+            }, 'confirm-book-link');
+            confirm.classList.add('reader-review-primary'); confirm.disabled = true;
+            const selection = node('p', '', 'reader-review-hint'); selection.setAttribute('aria-live', 'polite');
+            const updateSelection = () => {
+                const book = books.find(book => book.id === selectedId);
+                selection.textContent = book ? `已选：${book.title} · ${book.author || '作者未识别'} · ${book.filename}` : '请选择一本书，再确认关联。';
+                confirm.disabled = saving || !book || selectedId === record.bookId;
+            };
+            const paint = () => {
+                list.replaceChildren();
+                const query = search.value.trim().toLowerCase();
+                const matches = books.filter(book => `${book.title} ${book.author} ${book.filename}`.toLowerCase().includes(query));
+                for (const book of matches) {
+                    const option = node('label', null, 'reader-archive-book-option');
+                    const radio = node('input'); radio.type = 'radio'; radio.name = 'archive-book'; radio.value = book.id; radio.checked = book.id === selectedId;
+                    radio.addEventListener('change', () => { selectedId = book.id; updateSelection(); });
+                    const details = node('div'); details.append(node('strong', book.title), node('span', book.author || '作者未识别'),
+                        node('span', `${book.filename} · ${(book.size / 1024).toFixed(1)} KB · 上传于 ${book.createdAt.slice(0, 10)}`, 'reader-review-hint'));
+                    option.append(radio, details); list.append(option);
+                }
+                if (!matches.length) list.append(node('p', books.length ? '没有匹配的书，试试其他关键词。' : '还没有已上传的 TXT，请先在书架上传，再回来关联。', 'reader-review-hint'));
+            };
+            search.addEventListener('input', paint);
+            const actions = node('div', null, 'reader-review-actions'); actions.append(confirm, cancel);
+            this.dialog.append(list, selection, actions); updateSelection(); paint(); search.focus();
+        } catch { if (active()) { status.textContent = '书籍列表读取失败，请返回档案后重试。'; this.dialog.append(cancel); } }
     }
     async readBook(bookId) {
         try {

@@ -72,7 +72,7 @@ html[data-theme="light"] .reader-review-dialog [data-rating="avoid"] { --rating-
 .reader-review-dialog .reader-rating-badge[data-rating="unset"] { border-style: dashed; font-weight: 400; }
 
 .reader-review-dialog .reader-archive-toolbar { margin-bottom: 16px; }
-.reader-review-dialog .reader-archive-filters { display: grid; grid-template-columns: 80px 80px minmax(150px, 1fr) minmax(150px, 1fr) 100px 115px; gap: 12px; padding: 16px; border-radius: 10px; background: var(--review-soft); }
+.reader-review-dialog .reader-archive-filters { display: grid; grid-template-columns: 80px 80px 145px minmax(130px, 1fr) minmax(150px, 1fr) 100px 115px; gap: 12px; padding: 16px; border-radius: 10px; background: var(--review-soft); }
 .reader-review-dialog .reader-archive-filter { display: flex; flex-direction: column; gap: 5px; min-width: 0; color: var(--review-muted); font-size: 12px; }
 .reader-review-dialog .reader-archive-filter :is(input, select) { width: 100%; min-width: 0; box-sizing: border-box; font-size: 13px; color: var(--review-text); }
 .reader-review-dialog .reader-archive-overview { display: flex; flex-wrap: wrap; gap: 28px; margin: 20px 0; }
@@ -119,6 +119,14 @@ html[data-theme="light"] .reader-review-dialog .reader-archive-chips.style butto
 .reader-review-dialog .reader-archive-table :is(td:nth-child(5), td:nth-child(6)) { min-width: 160px; }
 .reader-review-dialog .reader-archive-table .reader-archive-record-actions { min-width: 95px; padding: 0; }
 .reader-review-dialog .reader-archive-table .reader-review-danger { margin-left: 0; }
+.reader-review-dialog .reader-archive-book-search { display: block; margin-top: 16px; color: var(--review-muted); }
+.reader-review-dialog #archive-book-search { width: 100%; box-sizing: border-box; margin: 6px 0 12px; }
+.reader-review-dialog .reader-archive-book-options { max-height: 45dvh; overflow-y: auto; display: grid; gap: 8px; }
+.reader-review-dialog .reader-archive-book-option { display: flex; align-items: flex-start; gap: 12px; padding: 12px; border: 1px solid var(--review-line); border-radius: 8px; cursor: pointer; }
+.reader-review-dialog .reader-archive-book-option:has(input:checked) { border-color: var(--review-accent); background: var(--review-accent-soft); }
+.reader-review-dialog .reader-archive-book-option input { flex: 0 0 auto; margin-top: 5px; accent-color: var(--review-accent); }
+.reader-review-dialog .reader-archive-book-option div { min-width: 0; overflow-wrap: anywhere; }
+.reader-review-dialog .reader-archive-book-option :is(strong, span) { display: block; }
 
 .reader-review-dialog .reader-review-form { display: grid; gap: 20px; }
 .reader-review-dialog[data-mode="card"] { display: flex; flex-direction: column; overflow: hidden; }

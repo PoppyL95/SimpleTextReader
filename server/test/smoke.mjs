@@ -9,6 +9,7 @@ import { randomBytes, createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import WebSocket from 'ws';
 import { createLineMap } from '../../shared/core/reader/coordinates.js';
+import { TextProcessorCore } from '../../shared/core/text/text-processor-core.js';
 
 const cwd = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 export async function startReader(directory, basePath = '', token = randomBytes(24).toString('hex'), requestedPort) {
@@ -123,5 +124,23 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
         const map = createLineMap('第一章\r\n\r\n  中文正文  \r\n\n下一段\n', 3);
         assert.equal(map.toOriginal(3), 1); assert.equal(map.toOriginal(4), 3); assert.equal(map.toOriginal(5), 5);
         assert.equal(map.toRendered(3), 4); assert.equal(map.toRendered(2), 4); assert.equal(map.toOriginal(6), 6);
+    });
+    test('filename metadata recognizes Chinese book brackets and by without breaking existing formats', () => {
+        for (const [filename, title, author] of [
+            ['《纸船夜航》 by 秋舟', '纸船夜航', '秋舟'],
+            ['《纸船夜航》by秋舟', '纸船夜航', '秋舟'],
+            ['纸船夜航 BY 虚构作者', '纸船夜航', '虚构作者'],
+            ['《纸船夜航》  By： 秋舟', '纸船夜航', '秋舟'],
+            ['Paper Boats by River Reed', 'Paper Boats', 'River Reed'],
+            ['《纸船夜航》', '纸船夜航', ''],
+            ['Goodbye Moon', 'Goodbye Moon', ''],
+            ['The Bystander', 'The Bystander', ''],
+            ['纸船夜航.[秋舟]', '纸船夜航', '秋舟'],
+            ['《纸船夜航》.[秋舟]', '纸船夜航', '秋舟'],
+            ['《纸船夜航》 作者：秋舟', '纸船夜航', '秋舟'],
+        ]) {
+            const parsed = TextProcessorCore.getBookNameAndAuthor(filename);
+            assert.equal(parsed.bookName, title, filename); assert.equal(parsed.author, author, filename);
+        }
     });
 }
