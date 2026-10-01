@@ -1,8 +1,8 @@
-# 易笺自托管：第 1 期
+# 易笺自托管：第 2 期
 
-本期实现服务端原文书库、SQLite 阅读进度、浏览器缓存迁移、陪读鉴权和子路径运行。阅读排版、字体、目录、分页、无限滚动和设置继续使用上游实现；首次使用默认深色，仍可切换浅色。
+已实现服务端原文书库、SQLite 阅读进度、浏览器缓存迁移、陪读鉴权和子路径运行；本期增加划线、页边批注串和 handoff。阅读排版、字体、目录、分页、无限滚动和设置继续使用上游实现；首次使用默认深色，仍可切换浅色。
 
-划线、批注、handoff 属于第 2 期；读完卡片、档案、xlsx 导入和起草属于第 3 期，本期没有这些接口。
+读完卡片、档案、xlsx 导入和起草属于第 3 期，本期没有这些接口。
 
 ## 启动
 
@@ -64,7 +64,7 @@ location /reader/ {
 ```text
 DATA_DIR/
   books/<sha256>.txt     # 解码为 UTF-8 的原文，含空行
-  reader.db             # SQLite：书籍元数据与阅读进度
+  reader.db             # SQLite：书籍、进度、划线、批注与 handoff
   cache/                # 预留的可重建加工缓存
 ```
 
@@ -97,7 +97,7 @@ DATA_DIR/
 | POST | `/api/books?filename=...&encoding=...` | 原始 txt 请求体上传；编码参数可省略，最大 50 MiB |
 | GET | `/api/books/:id` | 元数据和当前进度 |
 | PATCH | `/api/books/:id` | JSON `{filename?, title?, author?}` |
-| DELETE | `/api/books/:id` | 删除书籍与进度 |
+| DELETE | `/api/books/:id` | 删除书籍、进度、划线、批注及该书 handoff |
 | GET | `/api/books/:id/download` | 下载 UTF-8 原文 |
 | GET | `/api/books/:id/text?from=1&to=20` | 原文片段，范围包含两端，保留空行 |
 | GET | `/api/books/:id/progress` | 当前进度 |
@@ -118,6 +118,51 @@ curl -H "Authorization: Bearer $HALS_TOKEN" \
   "$READER_URL/api/books/$BOOK_ID/progress"
 ```
 
+## 划线与页边批注
+
+电脑拖选、手机长按正文后，菜单提供“划线”“发给小克”和“批注”。划线收到服务器确认后才显示；重开书籍、换设备时从服务器恢复。高亮使用 CSS Highlight API，旧浏览器使用保持原段落/首字布局的文本标记兼容方式。
+
+每段左侧的淡色 `+` 可添加批注；已有批注显示小圆点，小克的未读批注显示亮色圆点。点开后按创建时间和 ID 排序显示整段批注，可回复某条批注或选定划线，也可编辑/删除自己的内容。批注文字按纯文本展示。关闭阅读时标记随之关闭；打开期间每 5 秒拉取新批注。
+
+所有批注和划线的 `author` 由服务端身份决定：浏览器为 `reader`，正确 Bearer 为 `hals`，请求体里的 `author` 被忽略。只有原作者可编辑/删除；读者可以设置已读/未读。展开批注串才明确标记其中已展示的小克批注为已读，GET、翻页和轮询不改变已读状态；小克编辑内容会重新置为未读。展开期间新到的批注仍保留未读提示，需要再次打开确认。
+
+划线坐标为 `{startLine, startOffset, endLine, endOffset, quote}`，行号从 1 开始，偏移为 UTF-16 单位，结束偏移不包含该字符。`quote` 必须等于坐标截取的**原文**，包含跨段空行、CR 和被阅读器隐藏的字符，最大 20000 字符。字符映射处理空白裁剪、不可见字符、HTML/实体和英文首字大写；无法可靠对应原文的选区会提示重新选择，不保存错误坐标。
+
+默认创建 comment，须提供原文 `line` 和非空 `text`（最大 10000 字符）。`parentId` 可指向同一本书的划线或批注；服务器沿用该锚点的行号，回复的回复归入同一批注串。跨书引用返回 404，冲突行号返回 400。删除锚点会连同其回复删除；界面有确认提示。划线可 PATCH 更新坐标及说明，已有回复的划线不能移动到另一行；批注的行号和父锚点不可修改。
+
+标记保存失败会明确提示；批注输入保留在当前输入框，联网后可重试。二期批注写入没有后台离线队列，关闭输入框或页面前需确认保存成功。
+
+## 第 2 期接口
+
+同样在所有路径前加 `BASE_PATH`，鉴权和浏览器同源要求与一期一致。
+
+| 方法 | 路径 | 用途 |
+|---|---|---|
+| GET | `/api/books/:id/notes` | 全部划线/批注数组，按 `createdAt, id` 排序；不标已读 |
+| POST | `/api/books/:id/notes` | `{line, text, parentId?}`；划线用 `{kind:"highlight", startLine, startOffset, endLine, endOffset, quote, text?}` |
+| PATCH | `/api/books/:id/notes/:noteId` | 编辑自己的批注 `text` 或划线坐标/说明 |
+| DELETE | `/api/books/:id/notes/:noteId` | 删除自己的划线/批注及其回复 |
+| POST | `/api/books/:id/notes/:noteId/read` | `{read:true}`；`false` 恢复未读，默认 `true`，仅浏览器读者 |
+| POST | `/api/books/:id/notes/read` | `{ids:[1,2], read:true, versions?:{"1":"updatedAt"}}` 批量标记，最多 500 个；可用版本防止误标晚到的编辑，冲突返回 409 |
+| POST | `/api/books/:id/handoff` | 读者发送选区：同划线坐标及 `chapter?`；服务器内部创建固定 `selection` 类型 |
+| GET | `/api/handoff?unread=1&limit=50&cursor=123` | `{items, nextCursor}`；按自增 ID 升序，ID 大于 cursor，limit 1–200 |
+| POST | `/api/handoff/:id/ack` | 确认已取，返回条目；重复调用保持同一 `acknowledgedAt` |
+
+`handoff` 的 `payload` 保存书籍 ID、书名 `title`、作者 `author`、章节和完整选区坐标/原文摘录。读取不会确认，陪读处理成功后需显式 ack；游标为上一页 `nextCursor`，为 `null` 时当前已无下一页。省略 `unread=1` 返回全部条目。没有通用 `POST /api/handoff`：类型、身份和 payload 由发送动作在服务端生成，不接受客户端任意入队。删除书籍同时删除其队列条目。
+
+```bash
+# 陪读写批注；不需要传 author。
+curl -H "Authorization: Bearer $HALS_TOKEN" -H 'Content-Type: application/json' \
+  --data '{"line":3,"text":"这是测试批注"}' \
+  "$READER_URL/api/books/$BOOK_ID/notes"
+curl -H "Authorization: Bearer $HALS_TOKEN" "$READER_URL/api/books/$BOOK_ID/notes"
+curl -H "Authorization: Bearer $HALS_TOKEN" "$READER_URL/api/handoff?unread=1&limit=50"
+# HANDOFF_ID 来自 items 中的 id；处理成功后确认。
+curl -X POST -H "Authorization: Bearer $HALS_TOKEN" "$READER_URL/api/handoff/$HANDOFF_ID/ack"
+```
+
+服务首次启动会为一期 SQLite 数据库自动增加 `notes`、`handoff` 表及索引，不改书籍和进度。备份范围仍为 `books/` 和 `reader.db`。
+
 ## 自测
 
 ```bash
@@ -126,6 +171,8 @@ npm test
 PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium npm run test:browser
 ```
 
-API 自测会创建临时 SQLite 数据目录和随机测试 token，自行启动/停止服务，不使用部署数据库。覆盖根路径、`/reader/`、去重、同名不同书、原文空行、元数据、进度冲突与回翻、beacon、鉴权、静态隔离、WebSocket 和重启持久化。
+API 自测会创建临时 SQLite 数据目录和随机测试 token，自行启动/停止服务，不使用部署数据库。覆盖根路径、`/reader/`、去重、同名不同书、原文空行、元数据、进度冲突与回翻、beacon、鉴权、静态隔离、WebSocket；二期增加划线/批注增改删、作者不可伪造、跨书回复拒绝、已读标记、handoff 游标分页与幂等确认，以及重启持久化。
 
-浏览器自测使用两个独立浏览器缓存验证换设备恢复、初始化不覆盖、断网回翻后重试、旧浏览器迁移及上游分页/无限滚动；所有书籍都是脚本生成的测试文本。若本机没有 Chromium，可自行安装后设置路径；阅读服务本身不需要浏览器。xlsx/handoff 自测在相应后续交付中增加。
+浏览器自测使用独立浏览器缓存验证换设备恢复、初始化不覆盖、断网回翻后重试、旧浏览器迁移及上游分页/无限滚动；二期增加拖选、跨段空行/中文/emoji 坐标、划线恢复、页边批注读写、未读提示、安全展示、移动端触摸菜单、高亮兼容渲染和断网输入保留。所有书籍都是脚本生成的测试文本。若本机没有 Chromium，可自行安装后设置路径；阅读服务本身不需要浏览器。xlsx 自测随第三期交付。
+
+移动端自动检查使用 390px 视口、Selection API 和触摸事件；系统原生长按手柄的交互需在实际手机浏览器验收。

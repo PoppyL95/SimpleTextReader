@@ -18,7 +18,7 @@ app.set('trust proxy', TRUSTED_PROXY.split(',').map(value => value.trim()));
 app.use(session({ secret: process.env.SESSION_SECRET || randomBytes(32).toString('hex'),
     name: 'readerSession', resave: false, saveUninitialized: false,
     cookie: { httpOnly: true, sameSite: 'strict', path: `${BASE_PATH}/`, secure: 'auto' } }));
-app.use(express.json({ limit: '64kb' }));
+app.use(express.json({ limit: '128kb' }));
 app.use((_req, res, next) => {
     res.set('X-Content-Type-Options', 'nosniff');
     res.set('Referrer-Policy', 'same-origin');

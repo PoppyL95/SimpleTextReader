@@ -34,6 +34,18 @@ export function readerRouter(store) {
     const save = route(async (req, res) => res.json(await store.saveProgress(req.params.id, req.body)));
     router.put('/books/:id/progress', save);
     router.post('/books/:id/progress', save); // sendBeacon uses POST.
+    router.get('/books/:id/notes', route(async (req, res) => res.json(await store.notes(req.params.id))));
+    router.post('/books/:id/notes', route(async (req, res) => res.status(201).json(await store.createNote(req.params.id, req.body, req.readerIdentity))));
+    router.patch('/books/:id/notes/:noteId', route(async (req, res) => res.json(await store.editNote(req.params.id, req.params.noteId, req.body, req.readerIdentity))));
+    router.delete('/books/:id/notes/:noteId', route(async (req, res) => {
+        await store.deleteNote(req.params.id, req.params.noteId, req.readerIdentity); res.sendStatus(204);
+    }));
+    router.post('/books/:id/notes/read', route(async (req, res) => res.json(await store.markNotes(req.params.id, req.body, req.readerIdentity))));
+    router.post('/books/:id/notes/:noteId/read', route(async (req, res) => res.json(await store.markNotes(req.params.id,
+        { ids: [req.params.noteId], read: req.body?.read }, req.readerIdentity))));
+    router.post('/books/:id/handoff', route(async (req, res) => res.status(201).json(await store.sendSelection(req.params.id, req.body, req.readerIdentity))));
+    router.get('/handoff', route(async (req, res) => res.json(await store.handoffs(req.query))));
+    router.post('/handoff/:id/ack', route(async (req, res) => res.json(await store.ackHandoff(req.params.id))));
     router.use((_req, res) => res.status(404).json({ error: 'API not found' }));
     router.use((error, _req, res, _next) => {
         const status = error.status || 500;

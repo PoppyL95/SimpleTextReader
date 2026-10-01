@@ -2398,6 +2398,7 @@ export const bookshelf = {
             // Listen for closeBook event
             cbReg.add("closeBook", () => {
                 CONFIG.VARS.IS_BOOK_OPENED = false;
+                document.dispatchEvent(new Event('reader:book-closed'));
                 // Clear the filename from localStorage for reopening the same book
                 localStorage.setItem(this._FILENAME_, "");
             });

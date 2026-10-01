@@ -1,0 +1,43 @@
+::highlight(reader-notes) { background-color: #b995395c; color: inherit; }
+mark.reader-highlight { background-color: #b995395c; color: inherit; font: inherit; padding: 0; }
+.reader-note-ui {
+    color: #eee; background: #252525; border: 1px solid #777; border-radius: .5rem;
+    font: 14px/1.5 sans-serif; box-shadow: 0 3px 12px #0005; z-index: 10000;
+}
+html[data-theme="light"] .reader-note-ui { color: #222; background: #fff; }
+.reader-note-ui button, .reader-note-marker {
+    color: inherit; background: transparent; border: 1px solid #8888;
+    border-radius: .35rem; padding: .35rem .65rem; cursor: pointer; font: inherit;
+}
+.reader-note-ui button:focus-visible, .reader-note-marker:focus-visible { outline: 2px solid #d3b664; }
+.reader-note-ui button:disabled { opacity: .5; cursor: wait; }
+#reader-selection-menu { position: fixed; display: flex; gap: .3rem; padding: .3rem; touch-action: manipulation; }
+#reader-selection-menu[hidden], #reader-note-thread[hidden] { display: none; }
+#reader-note-markers { position: fixed; inset: 0; pointer-events: none; z-index: 101; }
+.reader-note-marker {
+    position: absolute; width: 23px; height: 23px; padding: 0; pointer-events: auto;
+    color: #aaa; opacity: .35; font: 16px/21px sans-serif; border: 0;
+}
+.reader-note-marker:hover, .reader-note-marker:focus-visible, .reader-note-marker.has-notes { opacity: 1; }
+.reader-note-marker.unread { color: #ffe093; background: #765b24; border-radius: 50%; opacity: 1; }
+#reader-note-thread {
+    position: fixed; right: 1rem; top: 4rem; width: min(360px, calc(100vw - 2rem));
+    max-height: calc(100dvh - 6rem); overflow: auto; overscroll-behavior: contain; padding: .8rem; box-sizing: border-box;
+}
+#reader-note-thread header { display: flex; align-items: center; justify-content: space-between; gap: .5rem; }
+#reader-note-thread blockquote { margin: .6rem 0; padding: .4rem .6rem; border-left: 2px solid #bb9d50; }
+#reader-note-thread .reader-note-body, #reader-note-thread blockquote { white-space: pre-wrap; overflow-wrap: anywhere; }
+#reader-note-thread article { border-top: 1px solid #8885; padding: .6rem 0; }
+#reader-note-thread .reader-note-meta { color: #aaa; font-size: 12px; }
+#reader-note-thread p { font: inherit; color: inherit; text-align: left; text-indent: 0; margin: .5rem 0; }
+#reader-note-thread .reader-note-actions { display: flex; gap: .3rem; margin-top: .4rem; }
+#reader-note-thread textarea {
+    display: block; box-sizing: border-box; width: 100%; min-height: 5rem; margin: .5rem 0;
+    color: inherit; background: transparent; border: 1px solid #888; border-radius: .3rem; padding: .5rem; font: inherit;
+}
+#reader-note-thread .reader-note-error { color: #edb46b; }
+#reader-note-notice {
+    position: fixed; left: 50%; bottom: 2rem; transform: translateX(-50%);
+    max-width: calc(100vw - 2rem); padding: .5rem .8rem; pointer-events: none;
+}
+#reader-note-notice[hidden] { display: none; }

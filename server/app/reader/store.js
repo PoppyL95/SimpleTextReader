@@ -6,10 +6,10 @@ import { pathToFileURL } from 'node:url';
 import jschardet from 'jschardet';
 import { TextProcessorCore } from '../../../shared/core/text/text-processor-core.js';
 import { DATA_DIR } from './settings.js';
+import { AnnotationStore, ANNOTATION_SCHEMA } from './annotations.js';
+import { ReaderError } from './errors.js';
 
-export class ReaderError extends Error {
-    constructor(status, message) { super(message); this.status = status; }
-}
+export { ReaderError } from './errors.js';
 
 // Decode before hashing. Newlines and blank lines remain part of the original text.
 export function decodeBook(bytes, encoding) {
@@ -22,13 +22,15 @@ export function decodeBook(bytes, encoding) {
     catch { throw new ReaderError(400, 'Unsupported encoding; upload UTF-8 or specify encoding'); }
 }
 
-export class ReaderStore {
+export class ReaderStore extends AnnotationStore {
     constructor(directory = DATA_DIR) {
+        super();
         this.directory = directory;
         this.lengths = new Map();
         this.mutations = Promise.resolve();
         // Serialize mutations including original-file changes, not only SQL writes.
-        for (const method of ['upload', 'metadata', 'remove', 'saveProgress']) {
+        for (const method of ['upload', 'metadata', 'remove', 'saveProgress', 'createNote', 'editNote',
+            'deleteNote', 'markNotes', 'sendSelection', 'ackHandoff']) {
             const operation = this[method].bind(this);
             this[method] = (...args) => {
                 const result = this.mutations.then(() => operation(...args));
@@ -57,6 +59,7 @@ export class ReaderStore {
                 serverUpdatedAt TEXT NOT NULL
             );
         `);
+        await this.db.executeMultiple(ANNOTATION_SCHEMA);
         return this;
     }
     async list() {

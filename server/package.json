@@ -8,8 +8,8 @@
         "prisma:init": "prisma init",
         "prisma:generate": "prisma generate",
         "prisma:push": "prisma db push",
-        "test": "node --test test/smoke.mjs",
-        "test:browser": "node test/browser.mjs"
+        "test": "node --test test/smoke.mjs test/annotations.mjs",
+        "test:browser": "node test/browser.mjs && node test/browser-annotations.mjs"
     },
     "keywords": [
         "simpletextreader",

@@ -101,6 +101,7 @@ class ReaderSync {
         return prepared;
     }
     async beginOpening(file) {
+        document.dispatchEvent(new Event('reader:book-opening'));
         await this.prepareFile(file);
         let book = catalogBook(file.name);
         if (!book || !this.active) { this.current = null; return; }
@@ -136,6 +137,7 @@ class ReaderSync {
         this.suppressed = false;
         this.restoring = null;
         this.persist();
+        document.dispatchEvent(new Event('reader:book-opened'));
     }
     scrollToOffset(renderLine, offset, raw) {
         const element = document.getElementById(`line${renderLine}`);
