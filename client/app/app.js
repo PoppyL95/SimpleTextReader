@@ -24,6 +24,7 @@ import { initBookshelf } from "./modules/features/bookshelf.js";
 import { initFontpool } from "./modules/features/fontpool.js";
 import { initSettings } from "./modules/features/settings.js";
 import { initReader } from "./modules/features/reader.js";
+import { initMobileReader } from "./modules/features/reader-mobile.js";
 import { FileHandler } from "./modules/file/file-handler.js";
 import { SidebarSplitView } from "./modules/components/sidebar-splitview.js";
 import {
@@ -137,6 +138,7 @@ const appInitialized = (async function initializeApp() {
     // Sequential execution of initReader and initSettings
     if (window.consoleTime) console.time("[time][background] Initialize Reader");
     initReader();
+    initMobileReader();
     if (window.consoleTime) console.timeEnd("[time][background] Initialize Reader");
     if (window.consoleTime) console.time("[time][background] Initialize Settings");
     initSettings();

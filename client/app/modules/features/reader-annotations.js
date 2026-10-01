@@ -2,6 +2,7 @@
 import * as CONFIG from '../../config/index.js';
 import { readerSync } from '../api/reader-sync.js';
 import { selectionQuote } from '../../../../shared/core/reader/coordinates.js';
+import { isNarrowReader } from './reader-mobile.js';
 
 function element(tag, text, className) {
     const node = document.createElement(tag);
@@ -41,6 +42,12 @@ class ReaderAnnotations {
         this.content = CONFIG.DOM_ELEMENT.CONTENT_CONTAINER;
         this.menu = element('div', null, 'reader-note-ui'); this.menu.id = 'reader-selection-menu'; this.menu.hidden = true;
         this.menu.setAttribute('role', 'toolbar'); this.menu.setAttribute('aria-label', '选中文字操作');
+        this.paragraphMenu = element('div', null, 'reader-note-ui'); this.paragraphMenu.id = 'reader-paragraph-menu'; this.paragraphMenu.hidden = true;
+        this.paragraphMenu.setAttribute('role', 'toolbar'); this.paragraphMenu.setAttribute('aria-label', '段落批注操作');
+        this.paragraphMenu.append(button('添加 / 查看批注', () => {
+            if (this.paragraphLine) this.openThread(this.paragraphLine);
+            this.paragraphMenu.hidden = true;
+        }));
         this.menu.append(button('划线', () => this.saveSelection('highlight')), button('发给小克', () => this.saveSelection('handoff')),
             button('批注', () => { if (this.selection) this.openThread(this.selection.startLine); this.menu.hidden = true; }));
         this.menu.addEventListener('pointerdown', event => {
@@ -51,7 +58,11 @@ class ReaderAnnotations {
         this.panel.setAttribute('role', 'dialog'); this.panel.setAttribute('aria-label', '页边批注');
         this.notice = element('div', null, 'reader-note-ui'); this.notice.id = 'reader-note-notice'; this.notice.hidden = true;
         this.notice.setAttribute('role', 'status');
-        document.body.append(this.menu, this.markers, this.panel, this.notice);
+        document.body.append(this.menu, this.paragraphMenu, this.markers, this.panel, this.notice);
+        this.content.addEventListener('click', event => this.captureParagraph(event));
+        this.content.addEventListener('scroll', () => {
+            this.menu.hidden = true; this.paragraphMenu.hidden = true; this.schedulePosition();
+        }, { passive: true });
         document.addEventListener('reader:book-opening', () => this.reset());
         document.addEventListener('reader:book-closed', () => this.reset());
         document.addEventListener('reader:book-opened', () => this.openBook());
@@ -59,9 +70,9 @@ class ReaderAnnotations {
             clearTimeout(this.selectionTimer); this.selectionTimer = setTimeout(() => this.captureSelection(), 180);
         });
         document.addEventListener('keydown', event => {
-            if (event.key === 'Escape' && (!this.menu.hidden || !this.panel.hidden)) {
-                event.preventDefault(); event.stopImmediatePropagation(); this.menu.hidden = true; this.closeThread();
-            } else if (this.panel.contains(event.target) || this.menu.contains(event.target)) {
+            if (event.key === 'Escape' && (!this.menu.hidden || !this.paragraphMenu.hidden || !this.panel.hidden)) {
+                event.preventDefault(); event.stopImmediatePropagation(); this.menu.hidden = true; this.paragraphMenu.hidden = true; this.closeThread();
+            } else if (this.panel.contains(event.target) || this.menu.contains(event.target) || this.paragraphMenu.contains(event.target)) {
                 // Cursor/navigation keys in the editor must not turn the reader's pages.
                 event.stopPropagation();
             }
@@ -69,12 +80,13 @@ class ReaderAnnotations {
         this.panel.addEventListener('wheel', event => event.stopPropagation(), { passive: true });
         document.addEventListener('pointerdown', event => {
             if (!this.menu.contains(event.target) && !this.content.contains(event.target)) this.menu.hidden = true;
+            if (!this.paragraphMenu.contains(event.target)) this.paragraphMenu.hidden = true;
         });
         this.observer = new MutationObserver(() => this.schedulePaint()); this.observe();
         window.addEventListener('scroll', () => {
-            this.menu.hidden = true; this.schedulePosition();
+            this.menu.hidden = true; this.paragraphMenu.hidden = true; this.schedulePosition();
         }, { passive: true });
-        window.addEventListener('resize', () => this.schedulePosition());
+        window.addEventListener('resize', () => { this.paragraphMenu.hidden = true; this.schedulePosition(); });
         window.visualViewport?.addEventListener('resize', () => this.schedulePosition());
         window.visualViewport?.addEventListener('scroll', () => this.schedulePosition());
         document.addEventListener('visibilitychange', () => { if (!document.hidden) this.refresh(); });
@@ -88,8 +100,9 @@ class ReaderAnnotations {
     observe() { this.observer.observe(this.content, { childList: true, subtree: true }); }
     reset() {
         this.revision++;
-        this.bookId = null; this.notes = []; this.selection = null; this.markers?.replaceChildren();
+        this.bookId = null; this.notes = []; this.selection = null; this.paragraphLine = null; this.markers?.replaceChildren();
         if (this.menu) this.menu.hidden = true;
+        if (this.paragraphMenu) this.paragraphMenu.hidden = true;
         this.closeThread(); this.clearHighlights();
     }
     openBook() {
@@ -129,6 +142,7 @@ class ReaderAnnotations {
         if (!this.bookId || readerSync.suppressed || !CONFIG.VARS.IS_BOOK_OPENED) return;
         const selected = window.getSelection();
         if (!selected.rangeCount || selected.isCollapsed) { this.menu.hidden = true; return; }
+        this.paragraphMenu.hidden = true;
         const range = selected.getRangeAt(0);
         if (!this.content.contains(range.startContainer) || !this.content.contains(range.endContainer)) { this.menu.hidden = true; return; }
         const map = readerSync.maps.get(this.bookId);
@@ -157,6 +171,17 @@ class ReaderAnnotations {
         this.menu.hidden = false;
         this.menu.style.left = `${Math.max(view.left + 8, Math.min(rect.left, view.left + view.width - this.menu.offsetWidth - 8))}px`;
         this.menu.style.top = `${Math.max(view.top + 8, Math.min(rect.top - this.menu.offsetHeight - 8, view.top + view.height - this.menu.offsetHeight - 8))}px`;
+    }
+    captureParagraph(event) {
+        if (!isNarrowReader() || !this.bookId || readerSync.suppressed || !CONFIG.VARS.IS_BOOK_OPENED || !window.getSelection().isCollapsed) return;
+        if (event.target.closest('a,button,input')) return;
+        const paragraph = event.target.closest('p[id^="line"]');
+        const source = paragraph && readerSync.maps.get(this.bookId)?.source(Number(paragraph.id.slice(4)));
+        if (!source) return;
+        this.paragraphLine = source.line; this.paragraphMenu.hidden = false; this.menu.hidden = true;
+        const rect = paragraph.getBoundingClientRect(), view = viewport();
+        this.paragraphMenu.style.left = `${view.left + view.width - this.paragraphMenu.offsetWidth - 12}px`;
+        this.paragraphMenu.style.top = `${Math.max(view.top + 60, Math.min(rect.top - this.paragraphMenu.offsetHeight - 8, view.top + view.height - this.paragraphMenu.offsetHeight - 104))}px`;
     }
     async saveSelection(action) {
         const selection = this.selection;
@@ -251,6 +276,8 @@ class ReaderAnnotations {
     }
     positionMarkers() {
         const view = viewport();
+        const narrow = isNarrowReader(), readingRect = this.content.getBoundingClientRect();
+        if (!isNarrowReader()) this.paragraphMenu.hidden = true;
         const panelWidth = Math.min(360, view.width - 32);
         this.panel.style.width = `${panelWidth}px`; this.panel.style.right = 'auto';
         this.panel.style.left = `${view.left + view.width - panelWidth - 16}px`;
@@ -259,9 +286,10 @@ class ReaderAnnotations {
             const node = document.getElementById(`line${marker.dataset.renderLine}`);
             const rect = node?.getBoundingClientRect();
             marker.hidden = !CONFIG.VARS.IS_BOOK_OPENED || !rect || rect.bottom < view.top || rect.top > view.top + view.height;
+            if (narrow && rect && (rect.top < readingRect.top || rect.top + 28 * (Number(marker.dataset.anchorIndex) + 1) > readingRect.bottom)) marker.hidden = true;
             if (rect) {
-                marker.style.left = `${Math.max(2, rect.left - 26 - Number(marker.dataset.anchorIndex) * 24)}px`;
-                marker.style.top = `${Math.max(2, rect.top + 2)}px`;
+                marker.style.left = `${isNarrowReader() ? view.left + 1 : Math.max(2, rect.left - 26 - Number(marker.dataset.anchorIndex) * 24)}px`;
+                marker.style.top = `${Math.max(2, rect.top + 2 + (isNarrowReader() ? Number(marker.dataset.anchorIndex) * 28 : 0))}px`;
             }
         }
     }
@@ -273,7 +301,7 @@ class ReaderAnnotations {
     }
     async openThread(line, highlightId = null) {
         this.thread = { line, highlightId, bookId: this.bookId }; this.editingId = null;
-        this.menu.hidden = true; this.renderThread(); this.panel.hidden = false;
+        this.menu.hidden = true; this.paragraphMenu.hidden = true; this.renderThread(); this.panel.hidden = false;
         const unread = this.threadNotes().filter(note => note.author === 'hals' && !note.readAt);
         const ids = unread.map(note => note.id), versions = Object.fromEntries(unread.map(note => [note.id, note.updatedAt]));
         if (!ids.length) return;

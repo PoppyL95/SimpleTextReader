@@ -1,0 +1,70 @@
+#reader-mobile-toolbar, #reader-mobile-toc-backdrop { display: none; }
+
+/* Keep the desktop split view and all saved typography settings unchanged. */
+@media (max-width: 600px) {
+    html, body { min-width: 0; width: 100%; }
+    .sidebar-splitview-outer {
+        height: 100dvh;
+        padding: calc(56px + env(safe-area-inset-top)) 0 calc(96px + env(safe-area-inset-bottom));
+    }
+    .sidebar-splitview-container { grid-template-columns: 0 0 minmax(0, 1fr); min-width: 0; min-height: 0; }
+    .sidebar-splitview-gap { display: none; }
+    .sidebar-splitview-content { grid-column: 3; min-width: 0; min-height: 0; }
+    #content {
+        width: 100% !important; height: 100% !important; max-width: 100%; min-width: 0;
+        margin: 0 !important; padding: 12px max(20px, env(safe-area-inset-right)) 32px max(20px, env(safe-area-inset-left));
+        box-sizing: border-box; column-count: 1 !important; background-image: none;
+    }
+    #content :is(p, h1, h2, h3, h4, h5, h6) { overflow-wrap: anywhere; }
+    .sidebar-splitview-sidebar {
+        /* Visibility preserves font/row measurements for the virtual TOC. */
+        visibility: hidden; pointer-events: none; transform: translateX(-100%);
+        position: fixed; z-index: 1002; left: 0;
+        top: calc(56px + env(safe-area-inset-top)); bottom: calc(96px + env(safe-area-inset-bottom));
+        width: min(320px, calc(100vw - 32px)); background: var(--bgColor); border-right: 1px solid var(--borderColor);
+    }
+    body.reader-mobile-toc-open .sidebar-splitview-sidebar { visibility: visible; pointer-events: auto; transform: none; }
+    .sidebar-splitview-sidebar-inner {
+        top: 0; transform: none; width: 100%; min-width: 0; height: 100%;
+        display: flex; flex-direction: column; padding: 16px; box-sizing: border-box;
+    }
+    #toc-content { flex: 1; min-height: 0; height: auto; }
+    #toc-content .toc-text { opacity: 1; }
+    #progress { margin: 16px 0 0; }
+    body.reader-mobile-book-open #reader-mobile-toolbar {
+        display: flex; align-items: center; position: fixed; z-index: 1004; top: 0; left: 0; right: 0;
+        height: calc(56px + env(safe-area-inset-top)); padding: env(safe-area-inset-top) 12px 0;
+        box-sizing: border-box; background: var(--bgColor); border-bottom: 1px solid var(--borderColor);
+    }
+    #reader-mobile-toc-toggle {
+        min-height: 44px; padding: 0 12px; font: 14px/1.5 var(--fontFamily_ui);
+        color: var(--fontColor); background: transparent; border: 1px solid var(--borderColor); border-radius: 6px;
+    }
+    #reader-mobile-toc-toggle:focus-visible { outline: 2px solid var(--mainColor_active); }
+    body.reader-mobile-toc-open #reader-mobile-toc-backdrop:not([hidden]) {
+        display: block; position: fixed; z-index: 1001; inset: calc(56px + env(safe-area-inset-top)) 0 calc(96px + env(safe-area-inset-bottom));
+        background: #0006; border: 0; padding: 0;
+    }
+    body.reader-mobile-book-open #reader-review-toolbar {
+        top: calc(6px + env(safe-area-inset-top)); left: 50% !important; width: max-content;
+    }
+    body.reader-mobile-book-open #reader-review-toolbar button { min-height: 44px; }
+    body.reader-mobile-book-open #main-btn-wrapper {
+        flex-direction: row; align-items: center; justify-content: flex-end; gap: 20px;
+        left: 0; right: 0; bottom: 0; min-height: 48px;
+        padding: 7px 16px calc(7px + env(safe-area-inset-bottom)); box-sizing: border-box;
+        background: var(--bgColor); border-top: 1px solid var(--borderColor);
+    }
+    body.reader-mobile-book-open #pagination {
+        position: fixed; left: 0; right: 0; bottom: calc(48px + env(safe-area-inset-bottom));
+        width: 100%; height: 48px; max-width: 100%; box-sizing: border-box;
+        transform: none; border-radius: 0; border: 0; box-shadow: none; overflow-x: auto;
+    }
+    #pagination .pagination { min-height: 48px; }
+    #pagination .pagination li { margin: 0 2px; }
+    #pagination .pagination a { padding: 8px 10px; }
+    .reader-note-marker:not(.has-notes) { display: none; }
+    .reader-note-marker.has-notes { width: 18px; height: 28px; font-size: 14px; line-height: 26px; }
+    body.reader-mobile-toc-open #reader-note-markers { visibility: hidden; }
+    #reader-paragraph-menu button { min-height: 44px; }
+}

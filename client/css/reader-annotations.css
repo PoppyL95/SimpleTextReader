@@ -13,6 +13,8 @@ html[data-theme="light"] .reader-note-ui { color: #222; background: #fff; }
 .reader-note-ui button:disabled { opacity: .5; cursor: wait; }
 #reader-selection-menu { position: fixed; display: flex; gap: .3rem; padding: .3rem; touch-action: manipulation; }
 #reader-selection-menu[hidden], #reader-note-thread[hidden] { display: none; }
+#reader-paragraph-menu { position: fixed; padding: .3rem; touch-action: manipulation; }
+#reader-paragraph-menu[hidden] { display: none; }
 #reader-note-markers { position: fixed; inset: 0; pointer-events: none; z-index: 101; }
 .reader-note-marker {
     position: absolute; width: 23px; height: 23px; padding: 0; pointer-events: auto;
