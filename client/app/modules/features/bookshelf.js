@@ -1141,6 +1141,11 @@ export const bookshelf = {
             height: canvasHeight,
             bookNameAndAuthor: currentBookNameAndAuthor,
         });
+        const caption = document.createElement('div');
+        caption.className = 'book-mobile-caption';
+        caption.textContent = [currentBookNameAndAuthor.bookName, currentBookNameAndAuthor.author].filter(Boolean).join(' · ');
+        caption.title = caption.textContent;
+        book.find('.cover-container').after(caption);
         const container = book.find(".cover-canvas")[0];
         if (CONFIG.CONST_UI.COVER_GENERATOR_CONFIG.USE_CANVAS) {
             this._coverGenerator.generate(coverSettings, container.getContext("2d"));
@@ -1697,6 +1702,12 @@ export const bookshelf = {
                 // console.warn("Required elements not found.");
                 return;
             }
+
+            // DOM cover artwork keeps its original coordinates while the mobile grid scales it.
+            const coverWidth = window.matchMedia('(max-width: 600px)').matches
+                ? parseFloat(window.getComputedStyle(booklist).gridTemplateColumns) : firstBook.offsetWidth;
+            booklist.closest('.bookshelf').style.setProperty('--mobile-cover-scale',
+                coverWidth / getSizePrecise(CONFIG.RUNTIME_VARS.STYLE.ui_bookCoverWidth));
 
             // Get the size and spacing of a single book
             const bookStyle = window.getComputedStyle(firstBook);

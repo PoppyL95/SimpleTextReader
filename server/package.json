@@ -9,7 +9,7 @@
         "prisma:generate": "prisma generate",
         "prisma:push": "prisma db push",
         "test": "node --test test/smoke.mjs test/annotations.mjs test/reviews.mjs",
-        "test:browser": "node test/browser.mjs && node test/browser-annotations.mjs && node test/browser-reviews.mjs && node test/browser-mobile-reader.mjs && node test/browser-page-turn.mjs"
+        "test:browser": "node test/browser.mjs && node test/browser-annotations.mjs && node test/browser-reviews.mjs && node test/browser-mobile-reader.mjs && node test/browser-mobile-bookshelf.mjs && node test/browser-page-turn.mjs"
     },
     "keywords": [
         "simpletextreader",
