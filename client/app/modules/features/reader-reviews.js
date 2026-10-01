@@ -302,9 +302,9 @@ class ReaderReviews {
         this.suggestion.hidden = false;
     }
     async openArchive(notice = '') {
-        this.card = null; this.dirty = false; this.filter = this.filter || { mode: 'book', q: '', rating: '', platform: '', background: '', tag: '' };
+        this.card = null; this.dirty = false; this.filter = this.filter || { mode: 'book', q: '', rating: '', background: '', tag: '' };
         this.filter.layout ||= 'cards';
-        this.filter.sort ||= 'default';
+        this.filter.sort ||= 'finished-desc';
         this.shell('读书档案', 'archive'); this.status.textContent = notice;
         const actions = node('div', null, 'reader-review-actions reader-archive-toolbar');
         this.fileInput = node('input'); this.fileInput.type = 'file'; this.fileInput.accept = '.xlsx'; this.fileInput.hidden = true; this.fileInput.id = 'reader-archive-import';
@@ -319,11 +319,11 @@ class ReaderReviews {
         mode.addEventListener('change', () => { this.filter.mode = mode.value; this.filter.tag = ''; this.loadArchive(); }); control('分组', mode);
         const layout = select([['cards', '卡片'], ['table', '表格']], this.filter.layout); layout.id = 'archive-layout'; layout.setAttribute('aria-label', '展示方式');
         layout.addEventListener('change', () => { this.filter.layout = layout.value; this.paintArchive(); }); control('展示', layout);
-        const sort = select([['default', '默认顺序'], ['finished', '最近读完优先']], this.filter.sort); sort.id = 'archive-sort'; sort.setAttribute('aria-label', '档案排序');
+        const sort = select([['finished-desc', '读完时间（新→旧）'], ['finished-asc', '读完时间（旧→新）'], ['title', '书名'], ['rating', '评价']], this.filter.sort); sort.id = 'archive-sort'; sort.setAttribute('aria-label', '档案排序');
         sort.addEventListener('change', () => { this.filter.sort = sort.value; this.archivePage = 0; this.paintArchive(); }); control('排序', sort);
         const search = node('input'); search.type = 'search'; search.placeholder = '书名或作者'; search.value = this.filter.q; search.setAttribute('aria-label', '搜索书名或作者');
         search.addEventListener('input', () => { this.filter.q = search.value; clearTimeout(this.searchTimer); this.searchTimer = setTimeout(() => this.loadArchive(), 250); }); control('查找', search, 'search');
-        for (const key of ['rating', 'platform', 'background']) {
+        for (const key of ['rating', 'background']) {
             const field = REVIEW_FIELDS.find(field => field.key === key);
             const input = select([['', `全部${field.label}`], ...field.options.map(value => [value, value])], this.filter[key]); input.id = `archive-${key}`; input.setAttribute('aria-label', field.label);
             input.addEventListener('change', () => { this.filter[key] = input.value; this.loadArchive(); }); control(key === 'rating' ? '评价' : key === 'background' ? '背景' : field.label, input);
@@ -334,7 +334,7 @@ class ReaderReviews {
     async loadArchive() {
         const generation = this.archiveGeneration = (this.archiveGeneration || 0) + 1;
         try {
-            const params = new URLSearchParams(Object.entries(this.filter).filter(([key, value]) => !['mode', 'tag', 'layout', 'sort'].includes(key) && value));
+            const params = new URLSearchParams(Object.entries(this.filter).filter(([key, value]) => ['q', 'rating', 'background'].includes(key) && value));
             const records = await (await readerSync.request(`/archives?${params}`)).json();
             if (this.mode !== 'archive' || this.overlay.hidden || generation !== this.archiveGeneration) return;
             this.records = records; this.archivePage = 0; this.paintArchive();
@@ -343,15 +343,24 @@ class ReaderReviews {
     paintArchive() {
         this.tags.replaceChildren(); this.archiveList.replaceChildren();
         if (this.filter.mode === 'tag') {
-            const counts = new Map(); for (const record of this.records) for (const tag of record.tags) counts.set(tag, (counts.get(tag) || 0) + 1);
+            const counts = new Map(); for (const record of this.records) for (const tag of new Set(record.fields.style || [])) counts.set(tag, (counts.get(tag) || 0) + 1);
             for (const [tag, count] of [...counts].sort((a, b) => a[0].localeCompare(b[0], 'zh'))) {
                 const chip = button(`${tag} (${count})`, () => this.filterTag(this.filter.tag === tag ? '' : tag));
                 chip.dataset.tag = tag; chip.classList.toggle('selected', this.filter.tag === tag); chip.setAttribute('aria-pressed', String(this.filter.tag === tag)); this.tags.append(chip);
             }
         }
-        const records = this.records.filter(record => this.filter.mode !== 'tag' || !this.filter.tag || record.tags.includes(this.filter.tag));
-        if (this.filter.sort === 'finished') records.sort((a, b) => (b.finishedAt || '').localeCompare(a.finishedAt || '') || b.id - a.id);
-        else if (this.filter.mode === 'book') records.sort((a, b) => `${a.title}\0${a.author}`.localeCompare(`${b.title}\0${b.author}`, 'zh') || b.id - a.id);
+        const records = this.records.filter(record => this.filter.mode !== 'tag' || !this.filter.tag || (record.fields.style || []).includes(this.filter.tag));
+        const ratings = REVIEW_FIELDS.find(field => field.key === 'rating').options;
+        const ratingRank = record => { const rank = ratings.indexOf(record.fields.rating); return rank < 0 ? ratings.length : rank; };
+        records.sort((a, b) => {
+            if (Boolean(a.finishedAt) !== Boolean(b.finishedAt)) return a.finishedAt ? -1 : 1;
+            let order = 0;
+            if (this.filter.sort === 'title') order = a.title.localeCompare(b.title, 'zh') || a.author.localeCompare(b.author, 'zh');
+            else if (this.filter.sort === 'rating') order = ratingRank(a) - ratingRank(b);
+            else if (this.filter.sort === 'finished-asc') order = (a.finishedAt || '').localeCompare(b.finishedAt || '');
+            else order = (b.finishedAt || '').localeCompare(a.finishedAt || '');
+            return order || b.id - a.id;
+        });
         const overview = node('div', null, 'reader-archive-overview');
         const bookCount = new Set(records.map(record => `${record.title}\0${record.author}`)).size;
         for (const [value, label] of [[records.length, '条记录'], [bookCount, '本书'], [records.filter(record => record.fields.completed === '已看完').length, '条已看完']]) {
@@ -412,7 +421,9 @@ class ReaderReviews {
         const chips = node(tag, null, `reader-archive-chips ${kind}`);
         if (!values.length) chips.append(node('span', '未填写', 'reader-review-hint'));
         for (const value of values) {
-            const chip = button(value, () => this.filterTag(value)); chip.dataset.filterTag = value; chip.title = `按“${value}”筛选档案`; chips.append(chip);
+            const chip = kind === 'style' ? button(value, () => this.filterTag(value)) : node('span', value);
+            if (kind === 'style') { chip.dataset.filterTag = value; chip.title = `按“${value}”筛选档案`; }
+            chips.append(chip);
         }
         return chips;
     }

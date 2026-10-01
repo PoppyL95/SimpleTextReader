@@ -104,13 +104,15 @@ try {
             await page.waitForSelector('#reader-finish-suggestion:not([hidden])');
             await page.click('[data-action="dismiss-finish"]'); assert.equal((await api('/archives')).length, 1);
             await archive(page);
-            await page.select('#archive-platform', '番茄');
+            assert.equal(await page.$('#archive-platform'), null);
+            await page.select('#archive-rating', '值得多刷');
             await page.waitForFunction(() => !document.querySelector('.reader-archive-item'));
-            await page.select('#archive-platform', '长佩');
+            await page.select('#archive-rating', '踩我雷点 滚');
             await page.waitForSelector('.reader-archive-item'); await page.select('#archive-mode', 'tag');
-            await page.waitForSelector('[data-tag="踩我雷点 滚"]'); await page.click('[data-tag="踩我雷点 滚"]');
+            assert.equal(await page.$$eval('.reader-archive-tags button', items => items.length), 0);
+            await page.select('#archive-mode', 'book');
             assert.equal(await page.$$eval('.reader-archive-item', items => items.length), 1);
-            await page.select('#archive-platform', ''); await page.select('#archive-mode', 'book');
+            await page.select('#archive-rating', ''); await page.select('#archive-mode', 'book');
             await chooseImport(page);
             assert.equal((await api('/archives')).length, 1, 'preview must not import');
             const importedFields = await page.evaluate(async () => (await import('./client/app/modules/features/reader-reviews.js')).readerReviews.importPreview.rows[0].record.fields);
@@ -179,7 +181,7 @@ try {
             for (const value of ['主受', '1v1', 'ABO', '青梅竹马', '久别重逢']) assert(visibleFields.includes(value), `${value} should be visible without opening the editor`);
             const titles = page => page.evaluate(() => [...document.querySelectorAll('.reader-archive-item .reader-archive-book-title h3')].map(element => element.textContent));
             const recentTitles = ['折纸星河', '测试书', '远山来信', '城市慢车', '雾色回廊', '月下空城', '未上传书'];
-            await page.select('#archive-sort', 'finished');
+            await page.select('#archive-sort', 'finished-desc');
             assert.deepEqual(await titles(page), recentTitles, 'recent completion order needs descending dates, stable ties and undated records last');
             async function assertRatingColors(page, theme) {
                 // Read one live DOM snapshot: a pending filter response can
@@ -212,7 +214,27 @@ try {
             assert(mobileTable.scroll > mobileTable.width, 'wide tables should scroll inside their own region');
             assert(mobileTable.dialogScroll <= mobileTable.dialogWidth + 1, 'the mobile review dialog must not overflow horizontally');
             await mobile.select('#archive-layout', 'cards'); await mobile.screenshot({ path: '/tmp/hals-archive-mobile.png' });
-            await mobile.select('#archive-sort', 'finished'); assert.deepEqual(await titles(mobile), recentTitles);
+            await mobile.select('#archive-sort', 'finished-desc'); assert.deepEqual(await titles(mobile), recentTitles);
+            for (const target of [page, mobile]) {
+                assert.equal(await target.$('#archive-platform'), null);
+                assert.deepEqual(await target.$$eval('#archive-sort option', options => options.map(option => option.textContent)),
+                    ['读完时间（新→旧）', '读完时间（旧→新）', '书名', '评价']);
+                await target.select('#archive-sort', 'finished-asc');
+                assert.deepEqual(await titles(target), ['月下空城', '雾色回廊', '远山来信', '城市慢车', '测试书', '折纸星河', '未上传书']);
+                await target.select('#archive-sort', 'title');
+                const alphabetical = [...recentTitles.filter(title => title !== '未上传书')].sort((a, b) => a.localeCompare(b, 'zh'));
+                assert.deepEqual(await titles(target), [...alphabetical, '未上传书']);
+                await target.select('#archive-sort', 'rating');
+                assert.deepEqual(await titles(target), ['折纸星河', '测试书', '雾色回廊', '城市慢车', '远山来信', '月下空城', '未上传书']);
+                await target.select('#archive-sort', 'finished-desc');
+                await target.select('#archive-mode', 'tag');
+                await target.waitForSelector('.reader-archive-tags button');
+                const tags = await target.$$eval('.reader-archive-tags button', chips => chips.map(chip => chip.dataset.tag));
+                assert(tags.includes('青梅竹马')); assert(!tags.includes('久别重逢')); assert(!tags.includes('主受'));
+                assert.equal(await target.$('.reader-archive-chips.extra button'), null);
+                await target.select('#archive-mode', 'book');
+            }
+
 
             await page.click('[data-action="close"]');
             const linkedBookId = await upload(page, '第一章\n\n这是手动关联测试的虚构原文。', '《纸船夜航》by秋舟.txt');
@@ -220,7 +242,7 @@ try {
             const cachedMetadata = await page.evaluate(async id => (await import('./client/app/modules/api/reader-catalog.js')).catalogEntries().find(book => book.id === id), linkedBookId);
             assert.equal(cachedMetadata.title, linkedBook.title); assert.equal(cachedMetadata.author, linkedBook.author);
             await archive(page);
-            assert.equal(await page.$eval('#archive-sort', select => select.value), 'finished', 'reopening archives should retain sorting');
+            assert.equal(await page.$eval('#archive-sort', select => select.value), 'finished-desc', 'reopening archives should retain sorting');
             const original = (await api('/archives')).find(record => record.title === '折纸星河');
             const recordSelector = `.reader-archive-item[data-record-id="${original.id}"]`;
             await page.click(`${recordSelector} [data-action="link-book"]`); await page.waitForSelector('#archive-book-search');
@@ -267,9 +289,9 @@ try {
             assert.equal((await titles(page)).length, 30); assert.equal((await titles(page))[0], recentTitles[0]);
             await page.click('.reader-archive-pagination button:last-child');
             assert.equal((await titles(page)).length, 8); assert.equal((await titles(page)).at(-1), '未上传书', 'undated records should be last across pagination');
-            await page.select('#archive-sort', 'default');
+            await page.select('#archive-sort', 'title');
             assert.equal(await page.$eval('.reader-archive-pagination button:first-child', button => button.disabled), true, 'changing sorting should reset pagination');
-            await page.select('#archive-sort', 'finished'); assert.equal((await titles(page))[0], '折纸星河');
+            await page.select('#archive-sort', 'finished-desc'); assert.equal((await titles(page))[0], '折纸星河');
             assert.deepEqual(errors, []); console.log(`Phase-three browser acceptance passed at ${prefix || '/'}`);
         } finally { await Promise.all(contexts.map(context => context.close())); await runtime.stop(); await rm(directory, { recursive: true, force: true }); }
     }
