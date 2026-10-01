@@ -23,6 +23,14 @@ function select(options, value = '') {
 function calendarDate(date) { return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`; }
 function today() { return calendarDate(new Date()); }
 function warningText(warning) { return `${warning.label}${warning.value ? `：${warning.value}` : ''}（${warning.message}）`; }
+const RATING_TONES = { '值得多刷': 'favorite', '可圈可点': 'good', '文荒可看': 'okay', '看不下去': 'muted', '踩我雷点 滚': 'avoid' };
+function ratingBadge(value) {
+    const badge = node('span', value || '未评价', 'reader-rating-badge');
+    badge.dataset.rating = RATING_TONES[value] || 'unset';
+    badge.setAttribute('aria-label', `阅读进度及评价：${value || '未评价'}`); return badge;
+}
+function extraTags(fields) { return [...new Set((fields.extraTags || '').split(/[\s,，]+/u).filter(Boolean))]; }
+function recordDate(record) { return record.finishedAt ? `${record.finishedAt} 读完` : `${(record.submittedAt || record.createdAt).slice(0, 10)} 记录`; }
 function duration(milliseconds) { return milliseconds == null ? '未知' : `${Math.floor(milliseconds / 3600000)} 小时 ${Math.floor(milliseconds / 60000) % 60} 分钟`; }
 function view() { return window.visualViewport || { width: document.documentElement.clientWidth, height: innerHeight, offsetLeft: 0, offsetTop: 0 }; }
 
@@ -68,12 +76,13 @@ class ReaderReviews {
     }
     position() {
         const viewport = view();
+        const width = Math.min(this.mode === 'archive' ? 1180 : 900, viewport.width - 32);
         this.toolbar.style.left = `${viewport.offsetLeft + viewport.width / 2}px`;
-        this.dialog.style.width = `${Math.min(850, viewport.width - 32)}px`;
+        this.dialog.style.width = `${width}px`;
         this.dialog.style.maxHeight = `${Math.max(120, viewport.height - 32)}px`;
         this.overlay.style.placeItems = 'start';
         this.dialog.style.position = 'fixed';
-        this.dialog.style.left = `${viewport.offsetLeft + Math.max(16, (viewport.width - Math.min(850, viewport.width - 32)) / 2)}px`;
+        this.dialog.style.left = `${viewport.offsetLeft + Math.max(16, (viewport.width - width) / 2)}px`;
         this.dialog.style.top = `${viewport.offsetTop + 16}px`;
     }
     trapFocus(event) {
@@ -84,6 +93,7 @@ class ReaderReviews {
     }
     shell(title, mode) {
         this.mode = mode; this.dialog.replaceChildren(); this.overlay.hidden = false; readingTracker.pause(true);
+        this.dialog.dataset.mode = mode;
         const header = node('header'), heading = node('h2', title); heading.id = 'reader-review-title';
         const close = button('关闭', () => this.close(), 'close'); header.append(heading, close); this.dialog.append(header);
         this.status = node('div', '', 'reader-review-status'); this.status.setAttribute('role', 'status'); this.dialog.append(this.status);
@@ -118,7 +128,18 @@ class ReaderReviews {
     }
     renderCard() {
         this.shell(this.card.id ? '编辑读书记录' : '读完卡片', 'card');
+        const content = node('div', null, 'reader-review-card-content'); this.dialog.append(content);
         const form = node('form', null, 'reader-review-form'); form.id = 'reader-review-form';
+        const group = (title, hint = '') => {
+            const section = node('fieldset', null, 'reader-review-form-section');
+            section.append(node('legend', title));
+            if (hint) section.append(node('p', hint, 'reader-review-hint'));
+            const grid = node('div', null, 'reader-review-form-grid'); section.append(grid); form.append(section); return grid;
+        };
+        const bookGroup = group('书籍与阅读');
+        const opinionGroup = group('评价与人物');
+        const genreGroup = group('题材与标签', '选择背景，展开对应题材；补充标签用空格或逗号分隔。');
+        const thoughtsGroup = group('读后感'); thoughtsGroup.classList.add('reader-review-thoughts');
         const field = (key, label, type = 'text', required = false) => {
             const wrapper = node('div', null, 'reader-review-field');
             const caption = node('label', label), input = node(type === 'textarea' ? 'textarea' : 'input');
@@ -126,14 +147,15 @@ class ReaderReviews {
             if (type !== 'textarea') input.type = type;
             input.required = required; input.value = this.card[key] || ''; input.maxLength = type === 'textarea' ? 50000 : 255;
             if (type === 'textarea') wrapper.classList.add('wide');
-            wrapper.append(caption, input); this.inputs[key] = input; form.append(wrapper); return input;
+            wrapper.append(caption, input); this.inputs[key] = input;
+            (key === 'reflection' ? thoughtsGroup : bookGroup).append(wrapper); return input;
         };
         field('title', '书名', 'text', true); field('author', '作者', 'text', true);
         field('startedAt', '开始阅读日期', 'date'); field('finishedAt', '读完日期', 'date');
         const statistics = node('div', null, 'reader-review-statistics');
         statistics.append(node('span', `累计阅读：${duration(this.card.readingMs)}`), node('span', `字数：${this.card.wordCount ?? '未知'}`));
-        this.dialog.append(statistics);
-        if (readingTracker.unsynced) this.dialog.append(node('p', '阅读时长尚未同步，联网后重新打开卡片可刷新。', 'reader-review-status'));
+        bookGroup.append(statistics);
+        if (readingTracker.unsynced) content.append(node('p', '阅读时长尚未同步，联网后重新打开卡片可刷新。', 'reader-review-status'));
         this.choiceWrappers = {};
         for (const definition of REVIEW_FIELDS) {
             const wrapper = node('div', null, `reader-review-field${definition.type === 'multi' ? ' multi' : ''}`);
@@ -147,6 +169,10 @@ class ReaderReviews {
                     if (input.value === '未看完') this.inputs.finishedAt.value = '';
                     else if (input.value === '已看完' && !this.inputs.finishedAt.value) this.inputs.finishedAt.value = today();
                 });
+                if (definition.key === 'rating') {
+                    const preview = node('div', null, 'reader-review-rating-preview'); preview.append(ratingBadge(value));
+                    input.addEventListener('change', () => preview.replaceChildren(ratingBadge(input.value))); wrapper.append(preview);
+                }
             } else if (definition.type === 'multi') {
                 const choices = node('div', null, 'reader-review-checkboxes');
                 this.inputs[definition.key] = [];
@@ -159,25 +185,29 @@ class ReaderReviews {
                 const input = node('input'); input.type = 'text'; input.value = value || ''; input.maxLength = definition.key === 'extraTags' ? 10000 : 1000;
                 input.id = `review-${definition.key}`; caption.htmlFor = input.id; this.inputs[definition.key] = input; wrapper.append(input);
             }
-            form.append(wrapper);
+            if (definition.key === 'extraTags') wrapper.classList.add('wide');
+            (['background', 'modern', 'ancient', 'future', 'fanfiction', 'style', 'extraTags'].includes(definition.key) ? genreGroup : opinionGroup).append(wrapper);
         }
+        opinionGroup.append(...['rating', 'completed', 'platform', 'characters', 'perspective', 'relationship'].map(key => this.choiceWrappers[key]));
         field('reflection', '感想', 'textarea');
+        thoughtsGroup.querySelector('.reader-review-field').classList.remove('wide');
         form.addEventListener('input', () => { this.dirty = true; }); form.addEventListener('change', () => { this.dirty = true; });
         form.addEventListener('submit', event => { event.preventDefault(); this.saveCard(); });
-        this.dialog.append(form); this.updateConditional();
-        if (this.card.warnings?.length) this.dialog.append(node('div', this.card.warnings.map(warningText).join('\n'), 'reader-review-warning'));
+        content.append(form); this.updateConditional();
+        if (this.card.warnings?.length) content.append(node('div', this.card.warnings.map(warningText).join('\n'), 'reader-review-warning'));
         if (this.card.source === 'import') {
-            const details = node('details'); details.append(node('summary', '原始导入字段'), node('pre', JSON.stringify(this.card.original, null, 2), 'reader-review-original')); this.dialog.append(details);
+            const details = node('details', null, 'reader-review-import-details'); details.append(node('summary', '原始导入字段'), node('pre', JSON.stringify(this.card.original, null, 2), 'reader-review-original')); content.append(details);
         }
-        const actions = node('div', null, 'reader-review-actions');
+        const actions = node('div', null, 'reader-review-actions reader-review-savebar');
         this.saveButton = button('保存记录', () => { if (form.reportValidity()) this.saveCard(); }, 'save-review');
+        this.saveButton.classList.add('reader-review-primary');
         this.draftButton = button('让小克起草', () => this.requestDraft(), 'request-draft'); this.draftButton.disabled = !this.card.bookId;
-        actions.append(this.saveButton, this.draftButton, button('返回档案', () => {
+        actions.append(this.saveButton, button('返回档案', () => {
             if (!this.dirty || window.confirm('尚未保存，确定返回档案？')) { this.dirty = false; this.openArchive(); }
         }, 'back-archive'));
-        if (!this.card.bookId) this.dialog.append(node('p', '这条记录还没有关联原文；关联书籍后可去阅读、让小克起草。'));
+        actions.append(this.status);
         this.dialog.append(actions);
-        this.draftBox = node('section', null, 'reader-review-draft'); this.dialog.append(this.draftBox); this.paintDraft();
+        this.draftBox = node('section', null, 'reader-review-draft'); thoughtsGroup.append(this.draftBox); this.paintDraft();
     }
     updateConditional(clear = false) {
         const background = this.inputs.background.value;
@@ -233,7 +263,9 @@ class ReaderReviews {
     }
     paintDraft() {
         if (!this.draftBox) return;
-        this.draftBox.replaceChildren(node('h3', '小克草稿'));
+        const heading = node('div', null, 'reader-review-draft-heading'); heading.append(node('h3', '小克草稿'), this.draftButton);
+        this.draftBox.replaceChildren(heading);
+        if (!this.card?.bookId) { this.draftBox.append(node('p', '关联原文后，可以让小克根据划线和批注起草。', 'reader-review-hint')); return; }
         if (!this.draftRequest) { this.draftBox.append(node('p', '点“让小克起草”，把这本书的划线和批注递过去。')); return; }
         if (this.draftRequest.status !== 'ready') { this.draftBox.append(node('p', '小克还在起草，你可以先填写或保存自己的感想。')); return; }
         this.draftBox.append(node('pre', this.draftRequest.draft), button('采用草稿', () => {
@@ -263,20 +295,27 @@ class ReaderReviews {
     }
     async openArchive(notice = '') {
         this.card = null; this.dirty = false; this.filter = this.filter || { mode: 'book', q: '', rating: '', platform: '', background: '', tag: '' };
+        this.filter.layout ||= 'cards';
         this.shell('读书档案', 'archive'); this.status.textContent = notice;
-        const actions = node('div', null, 'reader-review-actions');
+        const actions = node('div', null, 'reader-review-actions reader-archive-toolbar');
         this.fileInput = node('input'); this.fileInput.type = 'file'; this.fileInput.accept = '.xlsx'; this.fileInput.hidden = true; this.fileInput.id = 'reader-archive-import';
         this.fileInput.addEventListener('change', () => { if (this.fileInput.files[0]) this.previewImport(this.fileInput.files[0]); });
-        actions.append(button('新建记录', () => this.openCard(), 'new-record'), button('导入 xlsx', () => this.fileInput.click(), 'import-xlsx'), this.fileInput); this.dialog.append(actions);
+        const create = button('新建记录', () => this.openCard(), 'new-record'); create.classList.add('reader-review-primary');
+        actions.append(create, button('导入 xlsx', () => this.fileInput.click(), 'import-xlsx'), this.fileInput); this.dialog.append(actions);
         const filters = node('div', null, 'reader-archive-filters');
+        const control = (label, input, className = '') => {
+            const wrapper = node('label', null, `reader-archive-filter ${className}`); wrapper.append(node('span', label), input); filters.append(wrapper);
+        };
         const mode = select([['book', '按书'], ['tag', '按标签']], this.filter.mode); mode.setAttribute('aria-label', '档案分法'); mode.id = 'archive-mode';
-        mode.addEventListener('change', () => { this.filter.mode = mode.value; this.filter.tag = ''; this.loadArchive(); }); filters.append(mode);
+        mode.addEventListener('change', () => { this.filter.mode = mode.value; this.filter.tag = ''; this.loadArchive(); }); control('分组', mode);
+        const layout = select([['cards', '卡片'], ['table', '表格']], this.filter.layout); layout.id = 'archive-layout'; layout.setAttribute('aria-label', '展示方式');
+        layout.addEventListener('change', () => { this.filter.layout = layout.value; this.paintArchive(); }); control('展示', layout);
         const search = node('input'); search.type = 'search'; search.placeholder = '书名或作者'; search.value = this.filter.q; search.setAttribute('aria-label', '搜索书名或作者');
-        search.addEventListener('input', () => { this.filter.q = search.value; clearTimeout(this.searchTimer); this.searchTimer = setTimeout(() => this.loadArchive(), 250); }); filters.append(search);
+        search.addEventListener('input', () => { this.filter.q = search.value; clearTimeout(this.searchTimer); this.searchTimer = setTimeout(() => this.loadArchive(), 250); }); control('查找', search, 'search');
         for (const key of ['rating', 'platform', 'background']) {
             const field = REVIEW_FIELDS.find(field => field.key === key);
             const input = select([['', `全部${field.label}`], ...field.options.map(value => [value, value])], this.filter[key]); input.id = `archive-${key}`; input.setAttribute('aria-label', field.label);
-            input.addEventListener('change', () => { this.filter[key] = input.value; this.loadArchive(); }); filters.append(input);
+            input.addEventListener('change', () => { this.filter[key] = input.value; this.loadArchive(); }); control(key === 'rating' ? '评价' : key === 'background' ? '背景' : field.label, input);
         }
         this.tags = node('div', null, 'reader-archive-tags'); this.archiveList = node('div'); this.archiveList.id = 'reader-archive-list';
         this.dialog.append(filters, this.tags, this.archiveList); await this.loadArchive();
@@ -284,7 +323,7 @@ class ReaderReviews {
     async loadArchive() {
         const generation = this.archiveGeneration = (this.archiveGeneration || 0) + 1;
         try {
-            const params = new URLSearchParams(Object.entries(this.filter).filter(([key, value]) => key !== 'mode' && key !== 'tag' && value));
+            const params = new URLSearchParams(Object.entries(this.filter).filter(([key, value]) => !['mode', 'tag', 'layout'].includes(key) && value));
             const records = await (await readerSync.request(`/archives?${params}`)).json();
             if (this.mode !== 'archive' || this.overlay.hidden || generation !== this.archiveGeneration) return;
             this.records = records; this.archivePage = 0; this.paintArchive();
@@ -295,34 +334,100 @@ class ReaderReviews {
         if (this.filter.mode === 'tag') {
             const counts = new Map(); for (const record of this.records) for (const tag of record.tags) counts.set(tag, (counts.get(tag) || 0) + 1);
             for (const [tag, count] of [...counts].sort((a, b) => a[0].localeCompare(b[0], 'zh'))) {
-                const chip = button(`${tag} (${count})`, () => { this.filter.tag = this.filter.tag === tag ? '' : tag; this.archivePage = 0; this.paintArchive(); });
-                chip.dataset.tag = tag; chip.classList.toggle('selected', this.filter.tag === tag); this.tags.append(chip);
+                const chip = button(`${tag} (${count})`, () => this.filterTag(this.filter.tag === tag ? '' : tag));
+                chip.dataset.tag = tag; chip.classList.toggle('selected', this.filter.tag === tag); chip.setAttribute('aria-pressed', String(this.filter.tag === tag)); this.tags.append(chip);
             }
         }
         const records = this.records.filter(record => this.filter.mode !== 'tag' || !this.filter.tag || record.tags.includes(this.filter.tag));
         if (this.filter.mode === 'book') records.sort((a, b) => `${a.title}\0${a.author}`.localeCompare(`${b.title}\0${b.author}`, 'zh') || b.id - a.id);
-        this.archiveList.append(node('p', `共 ${records.length} 条记录${this.filter.tag ? ` · ${this.filter.tag}` : ''}`));
-        const pageRecords = records.slice(this.archivePage * 30, (this.archivePage + 1) * 30);
-        let group = '';
-        for (const record of pageRecords) {
-            const key = `${record.title}\0${record.author}`;
-            if (this.filter.mode === 'book' && key !== group) { this.archiveList.append(node('h3', `${record.title} · ${record.author}`)); group = key; }
-            const item = node('article', null, 'reader-archive-item'); item.dataset.recordId = record.id;
-            item.append(node('strong', this.filter.mode === 'tag' ? `${record.title} · ${record.author}` : record.finishedAt || record.submittedAt?.slice(0, 10) || record.createdAt.slice(0, 10)),
-                node('div', [record.fields.rating, record.fields.platform, record.fields.background, record.fields.completed].filter(Boolean).join(' · '), 'reader-archive-summary'));
-            if (record.warnings.length) item.append(node('div', '含导入警告，查看记录可见原始字段与提示', 'reader-review-warning'));
-            const actions = node('div', null, 'reader-review-actions');
-            actions.append(button('查看 / 编辑', () => this.openCard(record.bookId, record.id), 'edit-record'), button('删除', () => this.deleteRecord(record), 'delete-record'));
-            if (record.hasBook) actions.append(button('去阅读', () => this.readBook(record.bookId), 'read-book'));
-            else actions.append(node('span', '无对应原文'));
-            item.append(actions); this.archiveList.append(item);
+        const overview = node('div', null, 'reader-archive-overview');
+        const bookCount = new Set(records.map(record => `${record.title}\0${record.author}`)).size;
+        for (const [value, label] of [[records.length, '条记录'], [bookCount, '本书'], [records.filter(record => record.fields.completed === '已看完').length, '条已看完']]) {
+            const metric = node('div'); metric.append(node('strong', value), node('span', label)); overview.append(metric);
         }
-        if (!records.length) this.archiveList.append(node('p', '还没有符合条件的记录。'));
+        this.archiveList.append(overview);
+        if (this.filter.tag) {
+            const active = node('div', null, 'reader-archive-active-filter'); active.append(node('span', `标签：${this.filter.tag}`), button('清除筛选', () => this.filterTag(''), 'clear-tag'));
+            this.archiveList.append(active);
+        }
+        const pageRecords = records.slice(this.archivePage * 30, (this.archivePage + 1) * 30);
+        if (this.filter.layout === 'table' && records.length) {
+            this.archiveList.append(node('p', '表格可左右滚动，查看全部字段。', 'reader-review-hint'), this.archiveTable(pageRecords));
+        }
+        else {
+            const grid = node('div', null, 'reader-archive-grid');
+            for (const record of pageRecords) {
+                const item = node('article', null, 'reader-archive-item'); item.dataset.recordId = record.id; item.dataset.rating = RATING_TONES[record.fields.rating] || 'unset';
+                const heading = node('div', null, 'reader-archive-book-heading'); heading.append(this.archiveTitle(record), ratingBadge(record.fields.rating)); item.append(heading);
+                item.append(node('div', [recordDate(record), record.fields.platform, record.fields.completed].filter(Boolean).join(' · '), 'reader-archive-summary'));
+                if (record.fields.characters) item.append(node('p', `角色：${record.fields.characters}`, 'reader-archive-characters'));
+                const details = node('dl', null, 'reader-archive-details');
+                for (const [label, values, kind] of this.archiveDimensions(record)) {
+                    const row = node('div'); row.append(node('dt', label), this.archiveChips(values, kind, 'dd')); details.append(row);
+                }
+                item.append(details);
+                if (record.reflection) item.append(node('p', record.reflection, 'reader-archive-reflection'));
+                if (record.warnings.length) item.append(node('div', '含导入警告 · 查看记录了解详情', 'reader-review-warning'));
+                item.append(this.archiveActions(record)); grid.append(item);
+            }
+            this.archiveList.append(grid);
+        }
+        if (!records.length) {
+            const empty = node('div', null, 'reader-archive-empty'); empty.append(node('h3', '还没有符合条件的记录'), node('p', '试试调整筛选，或导入以前的问卷记录。')); this.archiveList.append(empty);
+        }
         if (records.length > 30) {
             const previous = button('上一页', () => { this.archivePage--; this.paintArchive(); }); previous.disabled = this.archivePage === 0;
             const next = button('下一页', () => { this.archivePage++; this.paintArchive(); }); next.disabled = (this.archivePage + 1) * 30 >= records.length;
-            this.archiveList.append(previous, node('span', ` ${this.archivePage + 1} / ${Math.ceil(records.length / 30)} `), next);
+            const pagination = node('nav', null, 'reader-archive-pagination'); pagination.setAttribute('aria-label', '档案分页');
+            pagination.append(previous, node('span', ` ${this.archivePage + 1} / ${Math.ceil(records.length / 30)} `), next); this.archiveList.append(pagination);
         }
+    }
+    filterTag(tag) {
+        this.filter.mode = 'tag'; this.filter.tag = tag; this.archivePage = 0;
+        this.dialog.querySelector('#archive-mode').value = 'tag'; this.paintArchive();
+    }
+    archiveTitle(record) {
+        const title = node('div', null, 'reader-archive-book-title'); title.append(node('h3', record.title), node('span', record.author, 'reader-archive-author')); return title;
+    }
+    archiveDimensions(record) {
+        const fields = record.fields;
+        const subjects = REVIEW_FIELDS.filter(field => field.when === fields.background).flatMap(field => fields[field.key] || []);
+        return [['视角 / 关系', [fields.perspective, fields.relationship].filter(Boolean), 'relationship'],
+            ['背景 / 题材', [fields.background, ...subjects].filter(Boolean), 'subject'],
+            ['故事风格', fields.style || [], 'style'], ['补充标签', extraTags(fields), 'extra']];
+    }
+    archiveChips(values, kind, tag = 'div') {
+        const chips = node(tag, null, `reader-archive-chips ${kind}`);
+        if (!values.length) chips.append(node('span', '未填写', 'reader-review-hint'));
+        for (const value of values) {
+            const chip = button(value, () => this.filterTag(value)); chip.dataset.filterTag = value; chip.title = `按“${value}”筛选档案`; chips.append(chip);
+        }
+        return chips;
+    }
+    archiveActions(record) {
+        const actions = node('div', null, 'reader-review-actions reader-archive-record-actions');
+        actions.append(button('查看 / 编辑', () => this.openCard(record.bookId, record.id), 'edit-record'));
+        if (record.hasBook) actions.append(button('去阅读', () => this.readBook(record.bookId), 'read-book'));
+        else actions.append(node('span', '无对应原文', 'reader-review-hint'));
+        const remove = button('删除', () => this.deleteRecord(record), 'delete-record'); remove.classList.add('reader-review-danger'); actions.append(remove); return actions;
+    }
+    archiveTable(records) {
+        const wrapper = node('div', null, 'reader-archive-table-wrap'); wrapper.tabIndex = 0; wrapper.setAttribute('role', 'region'); wrapper.setAttribute('aria-label', '读书档案表格，可横向滚动');
+        const table = node('table', null, 'reader-archive-table'), head = node('thead'), headings = node('tr');
+        for (const label of ['书籍', '评价', '视角 / 关系', '背景 / 题材', '故事风格', '补充标签', '平台 / 日期', '操作']) { const heading = node('th', label); heading.scope = 'col'; headings.append(heading); }
+        head.append(headings); table.append(head); const body = node('tbody'); table.append(body);
+        for (const record of records) {
+            const row = node('tr', null, 'reader-archive-item'); row.dataset.recordId = record.id; row.dataset.rating = RATING_TONES[record.fields.rating] || 'unset';
+            const book = node('td'); book.append(this.archiveTitle(record));
+            if (record.fields.characters) book.append(node('p', `角色：${record.fields.characters}`, 'reader-archive-characters'));
+            if (record.warnings.length) book.append(node('span', '含导入警告', 'reader-review-warning'));
+            const rating = node('td'); rating.append(ratingBadge(record.fields.rating), node('div', record.fields.completed || '未填写', 'reader-review-hint')); row.append(book, rating);
+            for (const [, values, kind] of this.archiveDimensions(record)) { const cell = node('td'); cell.append(this.archiveChips(values, kind)); row.append(cell); }
+            const metadata = node('td'); metadata.append(node('div', record.fields.platform || '未填写'));
+            const date = node('time', recordDate(record).split(' ')[0]); date.dateTime = date.textContent; date.title = recordDate(record); metadata.append(date); row.append(metadata);
+            const actions = node('td'); actions.append(this.archiveActions(record)); row.append(actions); body.append(row);
+        }
+        wrapper.append(table); return wrapper;
     }
     async readBook(bookId) {
         try {

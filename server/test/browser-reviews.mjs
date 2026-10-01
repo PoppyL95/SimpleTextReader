@@ -26,6 +26,7 @@ try {
             const page = await context.newPage(); page.on('pageerror', error => errors.push(error.message));
             page.on('dialog', dialog => dialog.accept());
             if (mobile) await page.setViewport({ width: 390, height: 844, isMobile: true, hasTouch: true, deviceScaleFactor: 2 });
+            else await page.setViewport({ width: 1280, height: 900 });
             await page.goto(runtime.url + '/', { waitUntil: 'networkidle2' });
             await page.waitForFunction(async () => (await import('./client/app/modules/features/reader-reviews.js')).readerReviews.initialized);
             await page.evaluate(() => { if (window.Swal?.isVisible()) window.Swal.close(); });
@@ -47,11 +48,18 @@ try {
             await (await page.$('#reader-archive-import')).uploadFile(workbookPath);
             await page.waitForSelector('.reader-import-table tr[data-row="3"]');
         }
+        async function readingTypography(page) {
+            return page.$eval('#line3', element => {
+                const style = getComputedStyle(element);
+                return Object.fromEntries(['fontFamily', 'fontSize', 'lineHeight', 'letterSpacing', 'textIndent', 'margin', 'padding', 'width'].map(key => [key, style[key]]));
+            });
+        }
         try {
             const page = await device();
             const bookId = await upload(page, source, '测试书.[测试作者].txt');
             assert.equal((await api(`/books/${bookId}/stats`)).startedAt, null, 'opening alone is not reading');
             await page.evaluate(async () => (await import('./client/app/modules/features/reader.js')).reader.gotoLine(3, false));
+            const originalTypography = await readingTypography(page);
             await page.click('#line3');
             await new Promise(resolve => setTimeout(resolve, 1100));
             await page.click('#reader-review-toolbar [data-action="finish"]');
@@ -86,6 +94,7 @@ try {
             assert.equal((await api(`/books/${bookId}/review-draft?archiveId=${manual.id}`)).requestId, requestId, 'saving attaches the new-card draft');
             await page.screenshot({ path: '/tmp/hals-phase3-card.png' });
             await page.click('[data-action="close"]');
+            assert.deepEqual(await readingTypography(page), originalTypography, 'editing reviews must preserve reading typography and dimensions');
             await page.evaluate(async () => {
                 const { reader } = await import('./client/app/modules/features/reader.js');
                 const config = await import('./client/app/config/index.js'); reader.gotoPage(config.VARS.TOTAL_PAGES, 'bottom');
@@ -145,6 +154,57 @@ try {
             await mobile.evaluate(() => document.documentElement.setAttribute('data-theme', 'light'));
             assert.equal(await mobile.$eval('.reader-review-dialog', element => getComputedStyle(element).backgroundColor), 'rgb(255, 255, 255)');
             await mobile.screenshot({ path: '/tmp/hals-phase3-mobile.png' });
+            await page.select('#archive-layout', 'table');
+            await page.waitForSelector('.reader-archive-table');
+            assert((await page.$eval('.reader-archive-table', table => table.textContent)).includes('视角 / 关系'));
+            await page.select('#archive-layout', 'cards');
+            await page.waitForSelector('.reader-archive-grid');
+            const samples = [
+                { title: '折纸星河', rating: '值得多刷', perspective: '主受', relationship: '1v1', background: '未来', future: ['星际', 'ABO'], style: ['青梅竹马', '暗恋酸涩'], extraTags: '久别重逢 双向救赎,星际冒险' },
+                { title: '雾色回廊', rating: '可圈可点', perspective: '女主', relationship: '无cp', background: '古代', ancient: ['朝堂权谋'], style: ['论坛体'], extraTags: '悬疑 破案,群像' },
+                { title: '城市慢车', rating: '文荒可看', perspective: '双视角', relationship: '1v1', background: '现代', modern: ['职场'], style: ['小甜饼', '天降'], extraTags: '日常 治愈' },
+                { title: '远山来信', rating: '看不下去', perspective: '主攻', relationship: 'np', background: '古代', ancient: ['武侠江湖'], style: ['追妻火葬场'], extraTags: '节奏缓慢' },
+                { title: '月下空城', rating: '踩我雷点 滚', perspective: '男主', relationship: '1v1', background: '现代', modern: ['豪门'], style: ['替身/白月光'], extraTags: '误会过多' },
+            ];
+            await page.evaluate(async samples => {
+                const { readerReviews } = await import('./client/app/modules/features/reader-reviews.js');
+                for (const [index, sample] of samples.entries()) {
+                    const { title, ...fields } = sample;
+                    await readerReviews.json('/archives', { title, author: `虚构作者${index + 1}`, finishedAt: '2026-09-20',
+                        fields: { ...fields, platform: '晋江', completed: '已看完' } });
+                }
+                await readerReviews.loadArchive();
+            }, samples);
+            const visibleFields = await page.$eval('.reader-archive-grid', grid => grid.textContent);
+            for (const value of ['主受', '1v1', 'ABO', '青梅竹马', '久别重逢']) assert(visibleFields.includes(value), `${value} should be visible without opening the editor`);
+            async function assertRatingColors(page, theme) {
+                // Read one live DOM snapshot: a pending filter response can
+                // replace cards between Puppeteer's query and $$eval callback.
+                const badges = await page.evaluate(theme => {
+                    document.documentElement.setAttribute('data-theme', theme);
+                    return [...document.querySelectorAll('.reader-archive-grid .reader-rating-badge')].map(element => ({ text: element.textContent, color: getComputedStyle(element).color, background: getComputedStyle(element).backgroundColor }));
+                }, theme);
+                const ratings = samples.map(sample => badges.find(badge => badge.text === sample.rating));
+                assert(ratings.every(Boolean)); assert.equal(new Set(ratings.map(badge => badge.color)).size, 5, `ratings need distinct colors in ${theme} mode: ${JSON.stringify(ratings)}`);
+                assert.notEqual(ratings[0].background, ratings[1].background, 'the highest rating needs a more prominent fill');
+            }
+            await assertRatingColors(page, 'dark');
+            await page.screenshot({ path: '/tmp/hals-archive-cards-dark.png' });
+            await page.click('.reader-archive-chips.style [data-filter-tag="青梅竹马"]');
+            assert.equal(await page.$$eval('.reader-archive-item', items => items.length), 1);
+            assert.equal(await page.$eval('#archive-mode', select => select.value), 'tag');
+            await page.click('[data-action="clear-tag"]'); await page.select('#archive-mode', 'book');
+            await assertRatingColors(page, 'light'); await page.screenshot({ path: '/tmp/hals-archive-cards-light.png' });
+            await page.evaluate(() => document.documentElement.setAttribute('data-theme', 'dark'));
+            await page.select('#archive-layout', 'table'); await page.waitForSelector('.reader-archive-table');
+            assert.equal(await page.$$eval('.reader-archive-table .reader-rating-badge', badges => badges.length), 7);
+            await page.screenshot({ path: '/tmp/hals-archive-table.png' });
+            await mobile.click('[data-action="close"]'); await archive(mobile);
+            await mobile.select('#archive-layout', 'table');
+            const mobileTable = await mobile.$eval('.reader-archive-table-wrap', wrapper => ({ scroll: wrapper.scrollWidth, width: wrapper.clientWidth, dialogScroll: wrapper.closest('.reader-review-dialog').scrollWidth, dialogWidth: wrapper.closest('.reader-review-dialog').clientWidth }));
+            assert(mobileTable.scroll > mobileTable.width, 'wide tables should scroll inside their own region');
+            assert(mobileTable.dialogScroll <= mobileTable.dialogWidth + 1, 'the mobile review dialog must not overflow horizontally');
+            await mobile.select('#archive-layout', 'cards'); await mobile.screenshot({ path: '/tmp/hals-archive-mobile.png' });
             assert.deepEqual(errors, []); console.log(`Phase-three browser acceptance passed at ${prefix || '/'}`);
         } finally { await Promise.all(contexts.map(context => context.close())); await runtime.stop(); await rm(directory, { recursive: true, force: true }); }
     }
