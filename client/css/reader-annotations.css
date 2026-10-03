@@ -74,3 +74,16 @@ html[data-theme="light"] .reader-note-ui { color: #222; background: #fff; }
     body.reader-page-mode:not(.reader-page-menu-open) #reader-all-notes-button { display: none; }
     #reader-all-notes .reader-all-note { min-height: 44px; }
 }
+#reader-all-notes .reader-all-note { position: relative; border: 1px solid #8885; border-radius: 6px; padding: 0; }
+#reader-all-notes .reader-all-note-toggle { width: 100%; text-align: left; border: 0; padding: 10px; }
+#reader-all-notes .reader-note-jump { position: absolute; right: 6px; top: 8px; padding: 4px 6px; font-size: 12px; }
+.reader-reply-count { display: block; color: #a79b8c; font-size: 12px; margin-top: 8px; }
+.reader-note-replies { margin: 0 10px 10px 18px; padding-left: 10px; border-left: 2px solid #8885; }
+.reader-note-reply { padding: 10px 0; border-top: 1px solid #8883; overflow-wrap: anywhere; }
+.reader-note-reply .reader-note-meta { font-size: 12px; color: #aaa; }
+.reader-note-reply details summary { cursor: pointer; white-space: pre-wrap; font-size: 13px; }
+.reader-all-note-toggle > strong { display: block; padding-right: 62px; }
+#reader-all-notes .reader-all-note-toggle blockquote {
+    display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden;
+    line-height: 1.5; max-height: 4.5em;
+}

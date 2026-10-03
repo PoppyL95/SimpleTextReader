@@ -69,9 +69,17 @@ try {
                 document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Shift', bubbles: true }));
                 await reader.gotoLine(15, false); await readerSync.flush();
             });
-            assert.match(await second.$eval('#reader-sync-status', element => element.textContent), /尚未同步/);
+            assert(await second.$eval('#reader-sync-status', element => element.hidden), 'a fresh failure is quiet for 30 seconds');
+            await second.evaluate(async () => {
+                const { readerSync: sync } = await import('./client/app/modules/api/reader-sync.js');
+                for (const key of Object.keys(sync.failures)) sync.failures[key] -= 31000;
+                sync.persist();
+            });
+            assert.match(await second.$eval('#reader-sync-status', element => element.getAttribute('aria-label')), /尚未同步/);
+            assert.equal(await second.$eval('#reader-sync-status', element => element.getBoundingClientRect().width), 6);
             runtime = await startReader(directory, prefix, runtime.token, runtime.port);
             await second.evaluate(async () => (await import('./client/app/modules/api/reader-sync.js')).readerSync.retry());
+            assert(await second.$eval('#reader-sync-status', element => element.hidden), 'acknowledged retry clears the failure dot');
             const backtracked = await (await fetch(runtime.url + `/api/books/${reading.id}/progress`)).json();
             assert(backtracked.line < saved.line); assert(backtracked.clientUpdatedAt > saved.clientUpdatedAt);
             // Exercise upstream infinite scrolling without changing its pagination/typography.
@@ -100,8 +108,8 @@ try {
             assert(!(await (await fetch(runtime.url + '/api/books')).json()).some(book => book.filename === '旧书.[旧作者].txt'), 'legacy auto-open must not upload before consent');
             await migration.evaluate(() => { if (window.Swal?.isVisible()) window.Swal.close(); });
             await migration.click('#reader-migration button');
-            await migration.waitForFunction(() => !document.getElementById('reader-migration') || document.getElementById('reader-sync-status')?.textContent.includes('迁移未完成'));
-            assert.equal(await migration.$eval('body', () => document.getElementById('reader-migration') ? document.getElementById('reader-sync-status')?.textContent : ''), '', 'migration failed');
+            await migration.waitForFunction(() => !document.getElementById('reader-migration') || document.getElementById('reader-migration')?.textContent.includes('迁移未完成'));
+            assert.equal(await migration.$eval('body', () => document.getElementById('reader-migration') ? document.getElementById('reader-migration')?.textContent : ''), '', 'migration failed');
             const migrated = (await (await fetch(runtime.url + '/api/books')).json()).find(book => book.filename === '旧书.[旧作者].txt');
             assert.equal(migrated.progress.line, 3);
             assert.deepEqual(errors, []);

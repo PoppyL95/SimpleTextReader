@@ -55,3 +55,10 @@ export function initMobileReader() {
     document.body.classList.toggle('reader-mobile-book-open', Boolean(CONFIG.VARS.IS_BOOK_OPENED));
     close();
 }
+
+/** Mobile reading appearance is separate from the saved desktop typography/colors. */
+export function applyMobileReadingTheme(value) {
+    document.documentElement.dataset.readerMobileTheme = value === 'original' ? 'original' : 'warm-brown';
+    document.dispatchEvent(new Event('reader:mobile-theme'));
+}
+applyMobileReadingTheme(localStorage.getItem('mobile_reading_theme'));

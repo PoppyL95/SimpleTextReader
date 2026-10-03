@@ -11,6 +11,7 @@ function load(key, fallback) {
 class ReaderSync {
     constructor() {
         this.pending = load('pending', {});
+        this.failures = load('syncFailures', {});
         this.deviceId = load('device', null) || crypto.randomUUID();
         localStorage.setItem(storagePrefix + 'device', JSON.stringify(this.deviceId));
         this.active = load('selfHosted', false);
@@ -28,13 +29,21 @@ class ReaderSync {
             element.id = 'reader-sync-status'; element.role = 'status'; element.setAttribute('aria-live', 'polite');
             document.body.append(element);
         }
-        element.textContent = message;
+        element.textContent = ''; element.title = message; element.setAttribute('aria-label', message || '已同步');
         element.hidden = !message;
     }
+    markFailure(key) { this.failures[key] ||= Date.now(); }
     persist() {
         localStorage.setItem(storagePrefix + 'pending', JSON.stringify(this.pending));
-        this.status(Object.keys(this.pending).length || catalogEntries().some(book => book.pendingUpload) ? '尚未同步' :
-            this.conflict ? '另一个设备保存了更新的进度，重新打开书籍可恢复' : '');
+        const keys = new Set([...Object.keys(this.pending).map(id => `progress:${id}`),
+            ...catalogEntries().filter(book => book.pendingUpload).map(book => `upload:${book.id}`)]);
+        for (const key of Object.keys(this.failures)) if (!keys.has(key)) delete this.failures[key];
+        localStorage.setItem(storagePrefix + 'syncFailures', JSON.stringify(this.failures));
+        clearTimeout(this.failureTimer);
+        const first = Math.min(...Object.values(this.failures).filter(time => Number.isFinite(time) && time > 0));
+        const remaining = first + 30000 - Date.now();
+        if (Number.isFinite(first) && remaining > 0) this.failureTimer = setTimeout(() => this.persist(), remaining);
+        this.status(Number.isFinite(first) && remaining <= 0 ? '尚未同步，连接恢复后会自动重试' : '');
     }
     async request(endpoint, options = {}) {
         const response = await fetch(readerApi + endpoint, { credentials: 'same-origin', ...options,
@@ -55,7 +64,10 @@ class ReaderSync {
                 this.active = true; this.online = true; this.csrf = health.csrfToken;
                 localStorage.setItem(storagePrefix + 'selfHosted', 'true');
                 return true;
-            } catch { this.online = false; this.status(this.active ? '尚未同步：服务器连接失败' : ''); return false; }
+            } catch { this.online = false;
+                for (const id of Object.keys(this.pending)) this.markFailure(`progress:${id}`);
+                for (const book of catalogEntries().filter(book => book.pendingUpload)) this.markFailure(`upload:${book.id}`);
+                this.persist(); return false; }
             finally { this.connection = null; }
         })();
         return this.connection;
@@ -95,7 +107,7 @@ class ReaderSync {
             book = await (await this.request(`/books?filename=${encodeURIComponent(file.name)}`, {
                 method: 'POST', headers: { 'Content-Type': 'text/plain; charset=utf-8' }, body: text })).json();
             this.online = true;
-        } catch { this.online = false; }
+        } catch { this.online = false; this.markFailure(`upload:${id}`); }
         rememberBook(book); this.persist();
         if (!book.pendingUpload) document.dispatchEvent(new CustomEvent('reader:book-uploaded', { detail: { id: book.id } }));
         const prepared = new File([text], cacheKey(id), { type: 'text/plain' });
@@ -124,7 +136,7 @@ class ReaderSync {
         this.restoring = progress;
         this.lastKnownTimestamp = progress.clientUpdatedAt;
         localStorage.setItem(file.name, map.toRendered(progress.line));
-        this.status(this.online ? '' : '尚未同步：使用本地缓存');
+        this.persist();
     }
     async finishOpening(reader) {
         if (!this.current || !this.active) return;
@@ -207,6 +219,7 @@ class ReaderSync {
                 try {
                     const saved = await (await this.request(`/books/${id}/progress`, { method: 'PUT',
                         headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(progress) })).json();
+                    delete this.failures[`progress:${id}`];
                     if (this.pending[id] === progress) delete this.pending[id];
                     const book = catalogBook(cacheKey(id)); if (book) rememberBook({ ...book, progress: saved });
                 } catch (error) {
@@ -214,7 +227,7 @@ class ReaderSync {
                         delete this.pending[id];
                         const book = catalogBook(cacheKey(id)); if (book) rememberBook({ ...book, progress: error.data.progress });
                         this.conflict = true;
-                    } else { this.online = false; break; }
+                    } else { this.online = false; this.markFailure(`progress:${id}`); break; }
                 }
             }
         } finally { this.flushing = false; this.persist(); }
@@ -243,7 +256,7 @@ class ReaderSync {
                     method: 'POST', headers: { 'Content-Type': 'text/plain; charset=utf-8' }, body: cached.data })).json();
                 rememberBook(saved);
                 document.dispatchEvent(new CustomEvent('reader:book-uploaded', { detail: { id: saved.id } }));
-            } catch { this.online = false; break; }
+            } catch { this.online = false; this.markFailure(`upload:${book.id}`); break; }
         }
         this.persist();
     }
@@ -303,7 +316,7 @@ class ReaderSync {
             const button = document.createElement('button'); button.textContent = '上传到服务器';
             button.addEventListener('click', async () => {
                 button.disabled = true;
-                try { await this.migrate(); banner.remove(); } catch (error) { this.status(error.message); button.disabled = false; }
+                try { await this.migrate(); banner.remove(); } catch (error) { label.textContent = error.message; button.disabled = false; this.persist(); }
             });
             banner.append(label, button); document.body.append(banner);
         }
@@ -319,7 +332,7 @@ class ReaderSync {
         setInterval(() => this.retry(), 15000);
     }
     async retry() {
-        try { if (await this.connect()) { await this.retryUploads(); await this.flush(); } } catch { this.status('尚未同步'); }
+        try { if (await this.connect()) { await this.retryUploads(); await this.flush(); } } catch { this.persist(); }
     }
 }
 export const readerSync = new ReaderSync();

@@ -1,3 +1,4 @@
+import { applyMobileReadingTheme } from "./reader-mobile.js";
 import { mobilePaging } from "./reader-page-turn.js";
 /**
  * @fileoverview Settings module for managing UI and style configurations.
@@ -161,6 +162,13 @@ const SETTINGS_SCHEMA = [
         options: ["pages", "scroll"], optionLabels: ["翻页", "滚动"], persist: true,
         getValue: function ($input) { return $input.closest(".select").children(".select-options").children(".is-selected").attr("rel") || this.values.mobile_reading_mode; },
         onApply: function (value) { mobilePaging.setMode(value); },
+    },
+
+    {
+        key: "mobile_reading_theme", type: "select", tab: "theme", label: "setting_mobile_reading_theme",
+        default: "warm-brown", options: ["warm-brown", "original"], optionLabels: ["暖棕夜读", "跟随原主题"], persist: true,
+        getValue: function ($input) { return $input.closest(".select").children(".select-options").children(".is-selected").attr("rel") || this.values.mobile_reading_theme; },
+        onApply: function (value) { applyMobileReadingTheme(value); mobilePaging.scheduleReflow(); },
     },
 
     // ==== Theme Tab (Light) ====
@@ -540,6 +548,7 @@ const MENU_SCHEMA = [
         id: "theme",
         order: 2,
         content: [
+            { section: "setting_separator_mobile_reading", order: 0, items: ["mobile_reading_theme"] },
             {
                 section: "setting_separator_light",
                 order: 1,
@@ -1291,6 +1300,7 @@ class SettingsMenu {
      */
     #initializeSelectors() {
         getDropdownSelector($("#setting_mobile_reading_mode"), this.settingsObj.values.mobile_reading_mode === "scroll" ? 1 : 0, [{ func: this.settingsObj.saveSettings.bind(this.settingsObj), params: [false, false] }]);
+        getDropdownSelector($("#setting_mobile_reading_theme"), this.settingsObj.values.mobile_reading_theme === "original" ? 1 : 0, [{ func: this.settingsObj.saveSettings.bind(this.settingsObj), params: [false, false] }]);
         // Language selector
         const languageIndex =
             this.settingsObj.values.ui_language === "auto" || !this.settingsObj.respectUserLangSetting

@@ -47,9 +47,8 @@ try {
                 await page.click('[data-filter="hals"]'); assert.equal(await page.$$eval('.reader-all-note', items => items.length), 2);
                 await page.click('[data-filter="unread"]'); assert.equal(await page.$$eval('.reader-all-note', items => items.length), 2);
                 await page.screenshot({ path: `/tmp/hals-all-notes-${mobile ? '390' : 'desktop'}${prefix ? '-subpath' : ''}.png` });
-                await page.click('.reader-all-note:last-child');
-                await page.waitForSelector('#reader-note-thread:not([hidden])');
-                assert((await page.$eval('#reader-note-thread header', node => node.textContent)).includes('第 50 行'));
+                await page.click('.reader-all-note:last-child .reader-note-jump');
+                assert(await page.$eval('#reader-all-notes', panel => panel.hidden));
                 assert(await page.evaluate(async id => {
                     const { readerSync } = await import('./client/app/modules/api/reader-sync.js');
                     const line = readerSync.maps.get(id).toRendered(50);
@@ -57,7 +56,6 @@ try {
                     const content = document.getElementById('content').getBoundingClientRect();
                     return rect.bottom >= content.top && rect.top <= content.bottom;
                 }, id), 'the clicked original line must be visible in the reader');
-                await page.click('#reader-note-thread header button');
                 await page.evaluate(async () => (await import('./client/app/modules/features/reader-annotations.js')).readerAnnotations.openThread(3));
                 if (mobile) await page.tap('#reader-note-thread .reader-note-actions button');
                 else await page.click('#reader-note-thread .reader-note-actions button');

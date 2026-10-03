@@ -116,7 +116,7 @@ class ReaderAnnotations {
         this.bookId = null; this.notes = []; this.selection = null; this.paragraphLine = null; this.markers?.replaceChildren();
         if (this.menu) this.menu.hidden = true;
         if (this.paragraphMenu) this.paragraphMenu.hidden = true;
-        this.closeThread(); this.closeAllNotes(); if (this.allButton) this.allButton.hidden = true; this.clearHighlights();
+        this.expandedNotes = new Set(); this.closeThread(); this.closeAllNotes(); if (this.allButton) this.allButton.hidden = true; this.clearHighlights();
     }
     openBook() {
         this.reset(); this.bookId = readerSync.current; this.allButton.hidden = !this.bookId; this.refresh(); this.schedulePaint();
@@ -313,6 +313,7 @@ class ReaderAnnotations {
             panel.style.top = `${view.top + panelTop}px`; panel.style.maxHeight = `${panelHeight}px`;
             panel.style.setProperty('--reader-note-panel-height', `${panelHeight}px`);
         }
+        this.allButton.textContent = narrow ? '批注' : '全部批注';
         this.allButton.style.left = `${view.left + view.width - this.allButton.offsetWidth - 12}px`; this.allButton.style.top = `${view.top + 8}px`;
         for (const marker of this.markers.children) {
             const node = document.getElementById(`line${marker.dataset.renderLine}`);
@@ -405,6 +406,10 @@ class ReaderAnnotations {
         this.allPanel.hidden = false; this.renderAllNotes(); this.positionMarkers(); this.refresh();
     }
     renderAllNotes() {
+        const previousList = this.allPanel.querySelector('.reader-all-notes-list');
+        const scrollTop = previousList?.scrollTop || 0;
+        const longReplies = new Set([...this.allPanel.querySelectorAll('.reader-note-reply details[open]')]
+            .map(node => Number(node.closest('[data-note-id]').dataset.noteId)));
         this.allPanel.replaceChildren();
         const header = element('header'); header.append(element('strong', '全部批注'), button('关闭', () => this.closeAllNotes()));
         const filters = element('div', null, 'reader-all-notes-filters');
@@ -415,16 +420,45 @@ class ReaderAnnotations {
             wrapper.append(input, document.createTextNode(label)); filters.append(wrapper);
         }
         const list = element('div', null, 'reader-all-notes-list');
-        const notes = this.notes.filter(note => (!this.allFilter.hals || note.author === 'hals') &&
-            (!this.allFilter.unread || note.author === 'hals' && !note.readAt)).sort((a, b) => a.line - b.line || a.id - b.id);
-        for (const note of notes) {
-            const item = button('', () => this.jumpToNote(note)); item.className = 'reader-all-note'; item.dataset.noteId = note.id;
-            item.append(element('strong', `第 ${note.line} 行 · ${note.author === 'hals' ? '小克' : '我'} · ${note.kind === 'highlight' ? '划线' : '批注'}${note.author === 'hals' && !note.readAt ? ' · 未读' : ''}`),
+        const matches = note => (!this.allFilter.hals || note.author === 'hals') &&
+            (!this.allFilter.unread || note.author === 'hals' && !note.readAt);
+        const roots = this.notes.filter(note => !note.parentId).sort((a, b) => a.line - b.line || a.id - b.id);
+        this.expandedNotes ||= new Set();
+        for (const note of roots) {
+            const replies = this.notes.filter(reply => reply.parentId === note.id && matches(reply)).sort((a, b) => a.id - b.id);
+            if (!matches(note) && !replies.length) continue;
+            const expanded = this.expandedNotes.has(note.id);
+            const item = element('article', null, 'reader-all-note'); item.dataset.noteId = note.id;
+            const toggle = button('', () => {
+                if (this.expandedNotes.has(note.id)) this.expandedNotes.delete(note.id); else this.expandedNotes.add(note.id);
+                this.renderAllNotes();
+            });
+            toggle.className = 'reader-all-note-toggle'; toggle.setAttribute('aria-expanded', String(expanded));
+            toggle.append(element('strong', `第 ${note.line} 行 · ${note.author === 'hals' ? '小克' : '我'} · ${note.kind === 'highlight' ? '划线' : '批注'}${note.author === 'hals' && !note.readAt ? ' · 未读' : ''}`),
                 element('blockquote', note.quote || readerSync.maps.get(this.bookId)?.raw[note.line - 1] || '（空行）'),
-                element('div', note.text || '（无附加批注）', 'reader-note-body')); list.append(item);
+                element('div', note.text || '（无附加批注）', 'reader-note-body'),
+                element('span', `${replies.length} 条回复${expanded ? ' · 收起' : ' · 展开'}`, 'reader-reply-count'));
+            const jump = button('原文↗', () => this.jumpToNote(note)); jump.className = 'reader-note-jump';
+            jump.setAttribute('aria-label', `跳到原文第 ${note.line} 行`);
+            item.append(toggle, jump);
+            if (expanded) {
+                const thread = element('div', null, 'reader-note-replies');
+                for (const reply of replies) {
+                    const row = element('article', null, 'reader-note-reply'); row.dataset.noteId = reply.id;
+                    row.append(element('div', `${reply.author === 'hals' ? '小克' : '我'}${reply.author === 'hals' && !reply.readAt ? ' · 未读' : ''}`, 'reader-note-meta'));
+                    if (reply.text.length > 180) {
+                        const folded = element('details'); folded.open = longReplies.has(reply.id); folded.append(element('summary', `${reply.text.slice(0, 120)}… 展开长回复`), element('div', reply.text, 'reader-note-body')); row.append(folded);
+                    } else row.append(element('div', reply.text, 'reader-note-body'));
+                    thread.append(row);
+                }
+                if (!replies.length) thread.append(element('p', '还没有回复。'));
+                item.append(thread);
+            }
+            list.append(item);
         }
-        if (!notes.length) list.append(element('p', '没有符合条件的划线或批注。'));
+        if (!list.children.length) list.append(element('p', '没有符合条件的划线或批注。'));
         this.allPanel.append(header, filters, list);
+        list.scrollTop = scrollTop;
     }
     async jumpToNote(note) {
         const bookId = this.bookId, map = readerSync.maps.get(bookId);
@@ -432,7 +466,6 @@ class ReaderAnnotations {
         const { reader } = await import('./reader.js');
         if (this.bookId !== bookId) return;
         await reader.gotoLine(map.toRendered(note.line), false);
-        if (this.bookId === bookId) this.openThread(note.line, note.kind === 'highlight' ? note.id : null);
     }
     async saveComment() {
         const thread = this.thread;

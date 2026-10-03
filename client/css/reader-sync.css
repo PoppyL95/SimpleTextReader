@@ -7,3 +7,9 @@
 #reader-sync-status[hidden] { display: none; }
 #reader-migration { bottom: 4rem; }
 #reader-migration button { color: inherit; background: #444; border: 1px solid #777; margin-left: .5rem; cursor: pointer; }
+
+#reader-sync-status {
+    width: 6px; height: 6px; padding: 0; border: 0; border-radius: 50%;
+    background: #a38a68; opacity: .65; box-shadow: none; font-size: 0;
+    left: 8px; right: auto; bottom: calc(8px + env(safe-area-inset-bottom));
+}

@@ -101,3 +101,47 @@
     }
 }
 #settingLabel-setting_mobile_reading_mode::before { content: "手机阅读方式"; }
+
+#reader-mobile-chapter, #reader-mobile-reading-footer { display: none; }
+#settingLabel-setting_mobile_reading_theme::before { content: "手机阅读主题"; }
+#setting_separator_mobile_reading::before { content: "手机阅读"; }
+@media (max-width: 600px) {
+    body.reader-page-mode .sidebar-splitview-outer { padding: calc(42px + env(safe-area-inset-top)) 0 calc(52px + env(safe-area-inset-bottom)); }
+    body.reader-page-mode #content { position: relative; }
+    body.reader-page-mode #content::after {
+        content: ''; position: absolute; top: 0; left: calc(var(--reader-page-extent, 0px) - 1px);
+        width: 1px; height: 1px; pointer-events: none;
+    }
+    body.reader-page-mode.reader-mobile-book-open:not(.reader-page-menu-open) #pagination { display: none; }
+    body.reader-page-mode.reader-mobile-book-open:not(.reader-page-menu-open) #reader-mobile-chapter {
+        display: block; position: fixed; top: calc(14px + env(safe-area-inset-top)); left: 20px; right: 20px;
+        font: 11px/1.4 -apple-system, "PingFang SC", sans-serif; color: #877e75; opacity: .7;
+        white-space: nowrap; text-overflow: ellipsis; overflow: hidden; pointer-events: none;
+    }
+    body.reader-page-mode.reader-mobile-book-open:not(.reader-page-menu-open) #reader-mobile-reading-footer {
+        display: flex; justify-content: space-between; position: fixed; left: 20px; right: 20px;
+        bottom: calc(16px + env(safe-area-inset-bottom)); font: 11px/1.4 -apple-system, "PingFang SC", sans-serif;
+        color: #877e75; opacity: .6; pointer-events: none; background: none; border: 0;
+    }
+    html[data-reader-mobile-theme="warm-brown"] body.reader-mobile-book-open {
+        --bgColor: #19120c; --fontColor: #a39a90; --fontInfoColor: #877e75;
+        --fontFamily_body: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
+        background: #19120c;
+    }
+    html[data-reader-mobile-theme="warm-brown"] body.reader-mobile-book-open #content {
+        background-color: #19120c; color: #a39a90;
+    }
+    html[data-reader-mobile-theme="warm-brown"] body.reader-mobile-book-open #content p {
+        font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
+        color: #a39a90; font-size: var(--p_fontSize); line-height: calc(var(--p_lineHeight) + .35em); text-indent: 2em !important;
+        margin: 0 0 .9em; text-align: justify; text-align-last: left;
+    }
+    html[data-reader-mobile-theme="warm-brown"] body.reader-mobile-book-open #content :is(.dropCap, .dropcap, .first-letter) {
+        font: inherit; color: inherit; float: none;
+    }
+    html[data-reader-mobile-theme="warm-brown"] body.reader-mobile-book-open #content :is(h1, h2, h3, h4, h5, h6) {
+        font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", sans-serif; color: #a39a90;
+    }
+    html[data-reader-mobile-theme="warm-brown"] body.reader-mobile-book-open #content :is(a.title, a.author) { color: #a39a90; }
+    body.reader-mobile-book-open #reader-all-notes-button { top: calc(6px + env(safe-area-inset-top)); font-size: 14px; padding: 8px 12px; }
+}

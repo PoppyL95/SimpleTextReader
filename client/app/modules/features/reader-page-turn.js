@@ -19,6 +19,12 @@ export const mobilePaging = {
     get atEnd() { return this.chapter === this.chapters.length - 1 && this.page === this.count - 1; },
     init(reader, sync) {
         this.reader = reader; this.sync = sync;
+        this.chapterLabel = document.createElement('div'); this.chapterLabel.id = 'reader-mobile-chapter';
+        this.readingFooter = document.createElement('div'); this.readingFooter.id = 'reader-mobile-reading-footer';
+        this.percentage = document.createElement('span'); this.clock = document.createElement('time');
+        this.readingFooter.append(this.percentage, this.clock); document.body.append(this.chapterLabel, this.readingFooter);
+        this.clockTimer = setInterval(() => this.updateReadingChrome(), 30000);
+        document.addEventListener('reader:mobile-theme', () => this.scheduleReflow());
         this.applyClass(); this.installGestures();
         screen.addEventListener('change', () => this.changeView());
         document.addEventListener('reader:book-opening', () => {
@@ -53,7 +59,7 @@ export const mobilePaging = {
         try {
             this.reader.toggleInfiniteScroll();
             this.content.scrollLeft = 0;
-            for (const key of ['--reader-page-height', '--reader-page-column']) this.content.style.removeProperty(key);
+            for (const key of ['--reader-page-height', '--reader-page-column', '--reader-page-extent']) this.content.style.removeProperty(key);
             this.reader.showCurrentPageContent(); this.reader.generatePagination();
             if (saved) {
                 await this.reader.gotoLine(saved.renderLine, false);
@@ -85,6 +91,7 @@ export const mobilePaging = {
     },
     measure() {
         const content = this.content;
+        content.style.removeProperty('--reader-page-extent');
         const p = content.querySelector('p') || content;
         const style = getComputedStyle(p);
         const lineHeight = parseFloat(style.lineHeight) || parseFloat(style.fontSize) * 1.6;
@@ -94,6 +101,9 @@ export const mobilePaging = {
         content.style.setProperty('--reader-page-column', `${content.parentElement.clientWidth - 40}px`);
         this.stride = content.clientWidth;
         this.count = Math.max(1, Math.ceil((content.scrollWidth - content.clientWidth - 1) / this.stride) + 1);
+        // The final CSS column can omit trailing scrollable padding. Reserve a full
+        // viewport for every page so scrollLeft is never clamped short on the last one.
+        content.style.setProperty('--reader-page-extent', `${this.count * this.stride}px`);
     },
     render(line = CONFIG.VARS.PAGE_BREAKS[CONFIG.VARS.CURRENT_PAGE - 1] || 0) {
         const chapters = this.chapters;
@@ -210,8 +220,20 @@ export const mobilePaging = {
         if (!open && document.body.classList.contains('reader-mobile-toc-open')) document.querySelector('#reader-mobile-toc-toggle')?.click();
         document.dispatchEvent(new Event('reader:page-menu'));
     },
+    updateReadingChrome() {
+        if (!this.active || !this.sync?.current || !this.currentAnchor) return;
+        const map = this.sync.maps.get(this.sync.current), anchor = this.currentAnchor;
+        const chapter = [...CONFIG.VARS.ALL_TITLES].reverse().find(title => Number(title[1]) <= anchor.renderLine)?.[0] || '';
+        this.chapterLabel.textContent = chapter.replace(/<[^>]*>/g, '');
+        const total = Math.max(1, map.raw.reduce((sum, line) => sum + line.length + 1, 0));
+        const read = map.raw.slice(0, anchor.line - 1).reduce((sum, line) => sum + line.length + 1, 0) + anchor.offset;
+        this.percentage.textContent = `${(this.atEnd ? 100 : Math.min(100, 100 * read / total)).toFixed(2)} %`;
+        const now = new Date(); this.clock.dateTime = now.toISOString();
+        this.clock.textContent = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+    },
     controls() {
         if (!this.active) return;
+        this.updateReadingChrome();
         const container = CONFIG.DOM_ELEMENT.PAGINATION_CONTAINER;
         const previous = document.createElement('button'); previous.textContent = '上一页'; previous.disabled = this.chapter === 0 && this.page === 0;
         previous.addEventListener('click', () => this.turn(-1));

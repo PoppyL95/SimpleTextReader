@@ -9,7 +9,7 @@ const source = `第一章 夜航\n\n${longParagraph}\n\n岸边的灯还亮着。
     Array.from({ length: 35 }, (_, i) => `清晨${i}，新的纸船从桥下出发。远处有人招手，河面泛起涟漪。`).join('\n');
 const browser = await puppeteer.launch({ executablePath: process.env.PUPPETEER_EXECUTABLE_PATH, headless: true, args: ['--no-sandbox'] });
 try {
-    for (const prefix of ['', '/reader']) {
+    for (const prefix of (process.env.READER_TEST_PREFIX !== undefined ? [process.env.READER_TEST_PREFIX] : ['', '/reader'])) {
         const directory = await mkdtemp('/tmp/hals-page-turn-');
         const runtime = await startReader(directory, prefix), errors = [], contexts = [];
         const suffix = prefix ? '-subpath' : '';
@@ -162,9 +162,9 @@ try {
             await mobile.keyboard.press('Escape');
             await mobile.waitForFunction(() => getComputedStyle(document.querySelector('#settings-menu')).display === 'none');
             await mobile.setViewport({ width: 390, height: 740, isMobile: true, hasTouch: true, deviceScaleFactor: 1 });
-            await mobile.waitForFunction(async () => (await import('./client/app/modules/features/reader-page-turn.js')).mobilePaging.content.clientHeight < 620);
+            await mobile.waitForFunction(async height => (await import('./client/app/modules/features/reader-page-turn.js')).mobilePaging.content.clientHeight < height, {}, before.height);
             await mobile.setViewport({ width: 390, height: 844, isMobile: true, hasTouch: true, deviceScaleFactor: 1 });
-            await mobile.waitForFunction(async () => (await import('./client/app/modules/features/reader-page-turn.js')).mobilePaging.content.clientHeight > 620);
+            await mobile.waitForFunction(async height => (await import('./client/app/modules/features/reader-page-turn.js')).mobilePaging.content.clientHeight === height, {}, before.height);
             assert.deepEqual((await state(mobile)).anchor, before.anchor);
             await mobile.evaluate(async () => (await import('./client/app/modules/api/reader-sync.js')).readerSync.flush());
             const progress = await (await fetch(runtime.url + `/api/books/${id}/progress`, { headers: { Authorization: `Bearer ${runtime.token}` } })).json();
