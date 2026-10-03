@@ -49,23 +49,32 @@ class ReaderAnnotations {
             if (this.paragraphLine) this.openThread(this.paragraphLine);
             this.paragraphMenu.hidden = true;
         }));
-        this.menu.append(button('划线', () => this.saveSelection('highlight')), button('发给小克', () => this.saveSelection('handoff')),
+        this.menu.append(button('划线', () => this.saveSelection('highlight')), button('递给小克', () => this.saveSelection('handoff')),
             button('批注', () => { if (this.selection) this.openThread(this.selection.startLine); this.menu.hidden = true; }));
         this.menu.addEventListener('pointerdown', event => {
+            // Snapshot the latest handle adjustment before dismissing the native selection bubble.
+            this.captureSelection();
+            this.interactingSelection = event.pointerType !== 'mouse'; clearTimeout(this.selectionTimer);
             if (event.pointerType === 'mouse') event.preventDefault();
+            else window.getSelection().removeAllRanges();
+            clearTimeout(this.selectionInteractionTimer);
+            this.selectionInteractionTimer = setTimeout(() => { this.interactingSelection = false; this.captureSelection(); }, 400);
         });
         this.markers = element('div'); this.markers.id = 'reader-note-markers';
         this.panel = element('section', null, 'reader-note-ui'); this.panel.id = 'reader-note-thread'; this.panel.hidden = true;
         this.panel.setAttribute('role', 'dialog'); this.panel.setAttribute('aria-label', '页边批注');
+        this.allPanel = element('section', null, 'reader-note-ui'); this.allPanel.id = 'reader-all-notes'; this.allPanel.hidden = true;
+        this.allPanel.setAttribute('role', 'dialog'); this.allPanel.setAttribute('aria-label', '全部批注');
+        this.allButton = button('全部批注', () => this.openAllNotes()); this.allButton.id = 'reader-all-notes-button'; this.allButton.className = 'reader-note-ui'; this.allButton.hidden = true;
         this.notice = element('div', null, 'reader-note-ui'); this.notice.id = 'reader-note-notice'; this.notice.hidden = true;
         this.notice.setAttribute('role', 'status');
-        document.body.append(this.menu, this.paragraphMenu, this.markers, this.panel, this.notice);
+        document.body.append(this.menu, this.paragraphMenu, this.markers, this.panel, this.allPanel, this.allButton, this.notice);
         this.content.addEventListener('click', event => this.captureParagraph(event));
         document.addEventListener('reader:paragraph-tap', event => this.captureParagraph(event.detail));
         document.addEventListener('reader:screen-page', () => { this.paragraphMenu.hidden = true; this.menu.hidden = true; this.schedulePosition(); });
-        document.addEventListener('reader:page-menu', () => { if (!document.body.classList.contains('reader-page-menu-open')) this.paragraphMenu.hidden = true; });
+        document.addEventListener('reader:page-menu', () => { if (!document.body.classList.contains('reader-page-menu-open')) this.paragraphMenu.hidden = true; this.schedulePosition(); });
         this.content.addEventListener('scroll', () => {
-            this.menu.hidden = true; this.paragraphMenu.hidden = true; this.schedulePosition();
+            if (!isNarrowReader()) this.menu.hidden = true; this.paragraphMenu.hidden = true; this.schedulePosition();
         }, { passive: true });
         document.addEventListener('reader:book-opening', () => this.reset());
         document.addEventListener('reader:book-closed', () => this.reset());
@@ -74,21 +83,21 @@ class ReaderAnnotations {
             clearTimeout(this.selectionTimer); this.selectionTimer = setTimeout(() => this.captureSelection(), 180);
         });
         document.addEventListener('keydown', event => {
-            if (event.key === 'Escape' && (!this.menu.hidden || !this.paragraphMenu.hidden || !this.panel.hidden)) {
-                event.preventDefault(); event.stopImmediatePropagation(); this.menu.hidden = true; this.paragraphMenu.hidden = true; this.closeThread();
-            } else if (this.panel.contains(event.target) || this.menu.contains(event.target) || this.paragraphMenu.contains(event.target)) {
+            if (event.key === 'Escape' && (!this.menu.hidden || !this.paragraphMenu.hidden || !this.panel.hidden || !this.allPanel.hidden)) {
+                event.preventDefault(); event.stopImmediatePropagation(); this.menu.hidden = true; this.paragraphMenu.hidden = true; this.closeThread(); this.closeAllNotes();
+            } else if (this.panel.contains(event.target) || this.menu.contains(event.target) || this.paragraphMenu.contains(event.target) || this.allPanel.contains(event.target)) {
                 // Cursor/navigation keys in the editor must not turn the reader's pages.
                 event.stopPropagation();
             }
         }, true);
-        this.panel.addEventListener('wheel', event => event.stopPropagation(), { passive: true });
+        for (const panel of [this.panel, this.allPanel]) panel.addEventListener('wheel', event => event.stopPropagation(), { passive: true });
         document.addEventListener('pointerdown', event => {
             if (!this.menu.contains(event.target) && !this.content.contains(event.target)) this.menu.hidden = true;
             if (!this.paragraphMenu.contains(event.target)) this.paragraphMenu.hidden = true;
         });
         this.observer = new MutationObserver(() => this.schedulePaint()); this.observe();
         window.addEventListener('scroll', () => {
-            this.menu.hidden = true; this.paragraphMenu.hidden = true; this.schedulePosition();
+            if (!isNarrowReader()) this.menu.hidden = true; this.paragraphMenu.hidden = true; this.schedulePosition();
         }, { passive: true });
         window.addEventListener('resize', () => { this.paragraphMenu.hidden = true; this.schedulePosition(); });
         window.visualViewport?.addEventListener('resize', () => this.schedulePosition());
@@ -107,10 +116,10 @@ class ReaderAnnotations {
         this.bookId = null; this.notes = []; this.selection = null; this.paragraphLine = null; this.markers?.replaceChildren();
         if (this.menu) this.menu.hidden = true;
         if (this.paragraphMenu) this.paragraphMenu.hidden = true;
-        this.closeThread(); this.clearHighlights();
+        this.closeThread(); this.closeAllNotes(); if (this.allButton) this.allButton.hidden = true; this.clearHighlights();
     }
     openBook() {
-        this.reset(); this.bookId = readerSync.current; this.refresh(); this.schedulePaint();
+        this.reset(); this.bookId = readerSync.current; this.allButton.hidden = !this.bookId; this.refresh(); this.schedulePaint();
     }
     async refresh() {
         const bookId = this.bookId;
@@ -125,7 +134,11 @@ class ReaderAnnotations {
             if (changed) {
                 this.schedulePaint();
                 // Do not mark newly arriving comments read until the reader explicitly opens the thread again.
-                if (this.thread && this.editor && !this.editor.value && !this.editingId) this.renderThread();
+                if (this.thread) {
+                    const previous = this.panel.querySelector('.reader-note-thread-content');
+                    if (previous) { const scrollTop = previous.scrollTop, content = this.threadContent(); previous.replaceWith(content); content.scrollTop = scrollTop; }
+                }
+                if (!this.allPanel.hidden) this.renderAllNotes();
             }
         } catch { /* Keep the last displayed annotations; writes report failures explicitly. */ }
         finally {
@@ -143,6 +156,7 @@ class ReaderAnnotations {
         return [...this.content.querySelectorAll('[id^="line"]')].filter(node => map?.source(Number(node.id.slice(4))) && node.textContent);
     }
     captureSelection() {
+        if (this.interactingSelection) return;
         if (!this.bookId || readerSync.suppressed || !CONFIG.VARS.IS_BOOK_OPENED) return;
         const selected = window.getSelection();
         if (!selected.rangeCount || selected.isCollapsed) { this.menu.hidden = true; return; }
@@ -170,11 +184,19 @@ class ReaderAnnotations {
         if (!quote || quote.length > 20000) { this.menu.hidden = true; this.message('请选取不超过 20000 字符的片段。'); return; }
         const chapter = [...CONFIG.VARS.ALL_TITLES].reverse().find(title => title[1] <= first.renderLine)?.[0] || '';
         this.selection = { ...anchor, quote, chapter, bookId: this.bookId };
-        const rect = range.getBoundingClientRect();
-        const view = viewport();
-        this.menu.hidden = false;
-        this.menu.style.left = `${Math.max(view.left + 8, Math.min(rect.left, view.left + view.width - this.menu.offsetWidth - 8))}px`;
-        this.menu.style.top = `${Math.max(view.top + 8, Math.min(rect.top - this.menu.offsetHeight - 8, view.top + view.height - this.menu.offsetHeight - 8))}px`;
+        this.selectionRect = range.getBoundingClientRect(); this.menu.hidden = false; this.positionSelectionMenu();
+    }
+    positionSelectionMenu() {
+        if (this.menu.hidden) return;
+        const view = viewport(), rect = this.selectionRect;
+        if (isNarrowReader()) {
+            this.menu.style.left = `${view.left + 12}px`; this.menu.style.width = `${view.width - 24}px`;
+            this.menu.style.top = `${view.top + view.height - this.menu.offsetHeight - 104}px`;
+        } else {
+            this.menu.style.width = '';
+            this.menu.style.left = `${Math.max(view.left + 8, Math.min(rect.left, view.left + view.width - this.menu.offsetWidth - 8))}px`;
+            this.menu.style.top = `${Math.max(view.top + 8, Math.min(rect.top - this.menu.offsetHeight - 8, view.top + view.height - this.menu.offsetHeight - 8))}px`;
+        }
     }
     captureParagraph(event) {
         if (!isNarrowReader() || !this.bookId || readerSync.suppressed || !CONFIG.VARS.IS_BOOK_OPENED || !window.getSelection().isCollapsed) return;
@@ -276,7 +298,7 @@ class ReaderAnnotations {
     }
     schedulePosition() {
         if (this.positionFrame) return;
-        this.positionFrame = requestAnimationFrame(() => { this.positionFrame = null; this.positionMarkers(); });
+        this.positionFrame = requestAnimationFrame(() => { this.positionFrame = null; this.positionMarkers(); this.positionSelectionMenu(); });
     }
     positionMarkers() {
         const view = viewport();
@@ -285,7 +307,13 @@ class ReaderAnnotations {
         const panelWidth = Math.min(360, view.width - 32);
         this.panel.style.width = `${panelWidth}px`; this.panel.style.right = 'auto';
         this.panel.style.left = `${view.left + view.width - panelWidth - 16}px`;
-        this.panel.style.top = `${view.top + 64}px`; this.panel.style.maxHeight = `${Math.max(100, view.height - 96)}px`;
+        const panelTop = narrow ? 12 : 64, panelHeight = Math.max(100, view.height - (narrow ? 24 : 96));
+        for (const panel of [this.panel, this.allPanel]) {
+            panel.style.width = `${panelWidth}px`; panel.style.left = `${view.left + view.width - panelWidth - 16}px`;
+            panel.style.top = `${view.top + panelTop}px`; panel.style.maxHeight = `${panelHeight}px`;
+            panel.style.setProperty('--reader-note-panel-height', `${panelHeight}px`);
+        }
+        this.allButton.style.left = `${view.left + view.width - this.allButton.offsetWidth - 12}px`; this.allButton.style.top = `${view.top + 8}px`;
         for (const marker of this.markers.children) {
             const node = document.getElementById(`line${marker.dataset.renderLine}`);
             const rect = mobilePaging.active ? mobilePaging.visibleRect(node) : node?.getBoundingClientRect();
@@ -304,6 +332,7 @@ class ReaderAnnotations {
             : note.line === this.thread.line).sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.id - b.id);
     }
     async openThread(line, highlightId = null) {
+        this.closeAllNotes();
         this.thread = { line, highlightId, bookId: this.bookId }; this.editingId = null;
         this.menu.hidden = true; this.paragraphMenu.hidden = true; this.renderThread(); this.panel.hidden = false;
         const unread = this.threadNotes().filter(note => note.author === 'hals' && !note.readAt);
@@ -325,14 +354,10 @@ class ReaderAnnotations {
         } catch { this.message('已读标记尚未同步，下次打开会重试。'); }
     }
     closeThread() { this.thread = null; this.editingId = null; if (this.panel) this.panel.hidden = true; }
-    renderThread() {
-        if (!this.thread) return;
-        const notes = this.threadNotes();
-        this.panel.replaceChildren();
-        const header = element('header');
-        header.append(element('strong', `原文第 ${this.thread.line} 行`), button('关闭', () => this.closeThread())); this.panel.append(header);
-        if (this.thread.highlightId) this.panel.append(button('查看本段全部批注', () => this.openThread(this.thread.line)));
-        else this.panel.append(element('blockquote', readerSync.maps.get(this.bookId)?.raw[this.thread.line - 1] || '（空行）'));
+    threadContent() {
+        const notes = this.threadNotes(), content = element('div', null, 'reader-note-thread-content');
+        if (this.thread.highlightId) content.append(button('查看本段全部批注', () => this.openThread(this.thread.line)));
+        else content.append(element('blockquote', readerSync.maps.get(this.bookId)?.raw[this.thread.line - 1] || '（空行）'));
         for (const note of notes) {
             const article = element('article'); article.dataset.noteId = note.id;
             article.append(element('div', `${note.author === 'hals' ? '小克' : '我'} · ${new Date(note.createdAt).toLocaleString()}${note.author === 'hals' && !note.readAt ? ' · 未读' : ''}`, 'reader-note-meta'));
@@ -341,24 +366,73 @@ class ReaderAnnotations {
             const actions = element('div', null, 'reader-note-actions');
             actions.append(button(note.kind === 'highlight' ? '在划线处批注' : '回复', () => {
                 this.replyId = note.kind === 'highlight' ? note.id : note.parentId ?? note.id;
-                this.editingId = null; this.editor.placeholder = '写一条回复…'; this.editor.focus();
+                this.editingId = null; this.editor.placeholder = '写一条回复…'; this.focusEditor();
             }));
             if (note.kind === 'highlight' && !this.thread.highlightId) actions.append(button('查看此划线', () => this.openThread(note.line, note.id)));
             if (note.author === 'reader') {
                 actions.append(button('编辑', () => {
                     this.editingId = note.id; this.editor.value = note.text;
-                    this.editor.placeholder = note.kind === 'highlight' ? '划线说明…' : '修改批注…'; this.editor.focus();
+                    this.editor.placeholder = note.kind === 'highlight' ? '划线说明…' : '修改批注…'; this.focusEditor();
                 }), button('删除', () => this.deleteNote(note)));
             } else actions.append(button('标为未读', () => this.markUnread(note)));
-            article.append(actions); this.panel.append(article);
+            article.append(actions); content.append(article);
         }
-        if (!notes.length) this.panel.append(element('p', '这一段还没有批注。'));
+        if (!notes.length) content.append(element('p', '这一段还没有批注。'));
+        return content;
+    }
+    renderThread() {
+        if (!this.thread) return;
+        this.panel.replaceChildren();
+        const header = element('header');
+        header.append(element('strong', `原文第 ${this.thread.line} 行`), button('关闭', () => this.closeThread())); this.panel.append(header);
+        this.panel.append(this.threadContent());
         this.replyId = this.thread.highlightId;
         this.editor = element('textarea'); this.editor.maxLength = 10000;
         this.editor.placeholder = this.replyId ? '在划线处写批注…' : '在这一段写批注…'; this.editor.setAttribute('aria-label', '批注内容');
         this.error = element('div', '', 'reader-note-error'); this.error.setAttribute('role', 'status');
         this.submit = button('保存批注', () => this.saveComment());
         this.panel.append(this.editor, this.submit, button('取消编辑', () => { this.editingId = null; this.renderThread(); }), this.error);
+    }
+    focusEditor() {
+        // Keep focus inside the trusted tap/click; async focus does not open the iOS keyboard.
+        this.editor.focus({ preventScroll: true });
+    }
+    closeAllNotes() { if (this.allPanel) this.allPanel.hidden = true; }
+    openAllNotes() {
+        if (!this.bookId) return;
+        this.closeThread(); this.menu.hidden = true; this.paragraphMenu.hidden = true;
+        this.allFilter ||= { hals: false, unread: false };
+        this.allPanel.hidden = false; this.renderAllNotes(); this.positionMarkers(); this.refresh();
+    }
+    renderAllNotes() {
+        this.allPanel.replaceChildren();
+        const header = element('header'); header.append(element('strong', '全部批注'), button('关闭', () => this.closeAllNotes()));
+        const filters = element('div', null, 'reader-all-notes-filters');
+        for (const [key, label] of [['hals', '只看小克的'], ['unread', '只看未读']]) {
+            const wrapper = element('label'), input = element('input'); input.type = 'checkbox'; input.checked = this.allFilter[key];
+            input.dataset.filter = key;
+            input.addEventListener('change', () => { this.allFilter[key] = input.checked; this.renderAllNotes(); });
+            wrapper.append(input, document.createTextNode(label)); filters.append(wrapper);
+        }
+        const list = element('div', null, 'reader-all-notes-list');
+        const notes = this.notes.filter(note => (!this.allFilter.hals || note.author === 'hals') &&
+            (!this.allFilter.unread || note.author === 'hals' && !note.readAt)).sort((a, b) => a.line - b.line || a.id - b.id);
+        for (const note of notes) {
+            const item = button('', () => this.jumpToNote(note)); item.className = 'reader-all-note'; item.dataset.noteId = note.id;
+            item.append(element('strong', `第 ${note.line} 行 · ${note.author === 'hals' ? '小克' : '我'} · ${note.kind === 'highlight' ? '划线' : '批注'}${note.author === 'hals' && !note.readAt ? ' · 未读' : ''}`),
+                element('blockquote', note.quote || readerSync.maps.get(this.bookId)?.raw[note.line - 1] || '（空行）'),
+                element('div', note.text || '（无附加批注）', 'reader-note-body')); list.append(item);
+        }
+        if (!notes.length) list.append(element('p', '没有符合条件的划线或批注。'));
+        this.allPanel.append(header, filters, list);
+    }
+    async jumpToNote(note) {
+        const bookId = this.bookId, map = readerSync.maps.get(bookId);
+        this.closeAllNotes();
+        const { reader } = await import('./reader.js');
+        if (this.bookId !== bookId) return;
+        await reader.gotoLine(map.toRendered(note.line), false);
+        if (this.bookId === bookId) this.openThread(note.line, note.kind === 'highlight' ? note.id : null);
     }
     async saveComment() {
         const thread = this.thread;

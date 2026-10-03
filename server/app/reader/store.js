@@ -6,6 +6,7 @@ import { pathToFileURL } from 'node:url';
 import jschardet from 'jschardet';
 import { TextProcessorCore } from '../../../shared/core/text/text-processor-core.js';
 import { DATA_DIR } from './settings.js';
+import { HandoffNotifier } from './handoff-notifier.js';
 import { ANNOTATION_SCHEMA } from './annotations.js';
 import { ReviewStore, REVIEW_SCHEMA } from './reviews.js';
 import { ReaderError } from './errors.js';
@@ -27,6 +28,7 @@ export class ReaderStore extends ReviewStore {
     constructor(directory = DATA_DIR) {
         super();
         this.directory = directory;
+        this.handoffNotifier = new HandoffNotifier();
         this.lengths = new Map();
         this.mutations = Promise.resolve();
         // Serialize mutations including original-file changes, not only SQL writes.
@@ -168,5 +170,5 @@ export class ReaderStore extends ReviewStore {
         }
         return current;
     }
-    close() { this.db?.close(); }
+    close() { this.handoffNotifier.close(); this.db?.close(); }
 }

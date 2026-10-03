@@ -152,6 +152,7 @@ export class AnnotationStore {
         const payload = { bookId, title: book.title, author: book.author, chapter: data.chapter || '', ...selection };
         const result = await this.db.execute({ sql: `INSERT INTO handoff (bookId,type,payload,createdAt)
             VALUES (?,'selection',?,?) RETURNING *`, args: [bookId, JSON.stringify(payload), new Date().toISOString()] });
+        this.handoffNotifier.enqueue({ type: 'selection', bookId, title: book.title });
         return this.describeHandoff(result.rows[0]);
     }
     describeHandoff(row) { return { ...row, payload: JSON.parse(row.payload) }; }

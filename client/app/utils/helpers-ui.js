@@ -1007,8 +1007,9 @@ export function handleGlobalScrolling({ isScrolling = true, delay = 150, destroy
                 CONFIG.VARS.TIPPY_INSTANCE = null;
             }
         }
-        // Blur focused element
-        if (document.activeElement && typeof document.activeElement.blur === "function") {
+        // Tooltip cleanup must not dismiss an editor or its mobile keyboard.
+        if (document.activeElement && typeof document.activeElement.blur === "function" &&
+            !document.activeElement.matches("input, textarea, select") && !document.activeElement.isContentEditable) {
             document.activeElement.blur();
         }
         if (typeof delay === "number" && delay > 0) {
@@ -1030,7 +1031,8 @@ export function handleGlobalScrolling({ isScrolling = true, delay = 150, destroy
         }
         // Flush any hover/focus state to prevent instant tooltip show
         document.body.dispatchEvent(new MouseEvent("mousemove", { bubbles: true }));
-        if (document.activeElement && typeof document.activeElement.blur === "function") {
+        if (document.activeElement && typeof document.activeElement.blur === "function" &&
+            !document.activeElement.matches("input, textarea, select") && !document.activeElement.isContentEditable) {
             document.activeElement.blur();
         }
     }

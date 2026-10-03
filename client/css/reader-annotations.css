@@ -43,3 +43,34 @@ html[data-theme="light"] .reader-note-ui { color: #222; background: #fff; }
     max-width: calc(100vw - 2rem); padding: .5rem .8rem; pointer-events: none;
 }
 #reader-note-notice[hidden] { display: none; }
+
+#reader-note-thread, #reader-all-notes {
+    display: flex; flex-direction: column; gap: 8px; overflow: hidden;
+    height: var(--reader-note-panel-height, calc(100dvh - 6rem));
+}
+#reader-note-thread[hidden], #reader-all-notes[hidden], #reader-all-notes-button[hidden] { display: none; }
+#reader-note-thread > header, #reader-all-notes > header { flex: 0 0 auto; }
+.reader-note-thread-content, .reader-all-notes-list { min-height: 0; flex: 1; overflow-y: auto; overscroll-behavior: contain; }
+#reader-note-thread .reader-note-actions { flex-wrap: wrap; }
+#reader-note-thread textarea {
+    flex: 0 0 auto; resize: vertical; max-height: 140px;
+    -webkit-user-select: text; user-select: text; touch-action: auto;
+}
+#reader-note-thread > button, #reader-note-thread .reader-note-error { flex: 0 0 auto; }
+#reader-all-notes { position: fixed; padding: 12px; box-sizing: border-box; }
+#reader-all-notes header { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+#reader-all-notes-button { position: fixed; z-index: 9998; font: 12px/1.5 sans-serif; padding: 8px; }
+.reader-all-notes-filters { display: flex; flex-wrap: wrap; gap: 12px; flex: 0 0 auto; }
+.reader-all-notes-filters label { display: flex; align-items: center; gap: 4px; }
+#reader-all-notes .reader-all-note { display: block; width: 100%; text-align: left; margin-bottom: 8px; box-sizing: border-box; }
+#reader-all-notes :is(blockquote, .reader-note-body) { white-space: pre-wrap; overflow-wrap: anywhere; margin: 8px 0; }
+#reader-all-notes p { font: inherit; color: inherit; text-align: left; text-indent: 0; }
+@media (max-width: 600px) {
+    #reader-selection-menu { box-sizing: border-box; justify-content: space-around; padding: 8px; }
+    #reader-selection-menu button { min-height: 44px; }
+    #reader-note-thread textarea { font-size: 16px; margin: 0; min-height: 72px; }
+    #reader-note-thread button, #reader-all-notes header button { min-height: 40px; }
+    #reader-all-notes-button { min-height: 44px; }
+    body.reader-page-mode:not(.reader-page-menu-open) #reader-all-notes-button { display: none; }
+    #reader-all-notes .reader-all-note { min-height: 44px; }
+}
